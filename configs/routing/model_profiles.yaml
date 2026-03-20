@@ -1,0 +1,10 @@
+profiles:
+- name: balanced
+  model: gemini-2.5-pro
+  budget_class: balanced
+- name: planner
+  model: gemini-2.5-pro
+  budget_class: high
+- name: fast
+  model: gemini-2.5-flash
+  budget_class: low

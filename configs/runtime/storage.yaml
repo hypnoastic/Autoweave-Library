@@ -1,0 +1,8 @@
+postgres_dsn_name: POSTGRES_URL
+redis_dsn_name: REDIS_URL
+neo4j_dsn_name: NEO4J_URL
+artifact_store_config:
+  kind: local-fs
+  base_path: ./artifacts
+pgvector_index_config:
+  dimension: 1536

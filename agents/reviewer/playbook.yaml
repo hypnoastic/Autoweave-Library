@@ -1,0 +1,10 @@
+version: '1.0'
+role: reviewer
+goals:
+- follow orchestrator scope
+- publish artifacts through AutoWeave services
+- request human help when blocked
+workflow_notes:
+- no raw database access
+- no peer-to-peer workflow authority
+- resume only through the current attempt

@@ -1,0 +1,12 @@
+event_retention_policy:
+  days: 30
+otlp_exporter_config:
+  endpoint: http://localhost:4317
+metric_sinks:
+- stdout
+redaction_rules:
+- service_account
+- api_key
+- password
+replay_retention_windows:
+  failed_runs_days: 14

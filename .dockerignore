@@ -1,0 +1,10 @@
+.env
+.env.local
+.pytest_cache/
+__pycache__/
+*.pyc
+var/
+workspaces/
+config/secrets/
+ergon-*.json
+README.md

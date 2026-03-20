@@ -1,0 +1,125 @@
+name: team
+version: '1.0'
+roles:
+- manager
+- backend
+- frontend
+- reviewer
+stages:
+- planning
+- implementation
+- integration
+- review
+entrypoint: manager_plan
+policies:
+  max_active_attempts: 4
+  human_requests: orchestrator_authoritative
+task_templates:
+- key: manager_plan
+  title: Manager plan
+  assigned_role: manager
+  description_template: Plan the implementation and split work across branches.
+  hard_dependencies: []
+  soft_dependencies: []
+  required_artifacts: []
+  produced_artifacts:
+  - workflow_plan
+  approval_requirements: []
+  memory_scopes:
+  - project
+  - workflow_run
+  route_hints:
+  - planning
+- key: backend_contract
+  title: Backend contract
+  assigned_role: backend
+  description_template: Define API and data contract for notifications settings.
+  hard_dependencies:
+  - manager_plan
+  soft_dependencies: []
+  required_artifacts:
+  - workflow_plan
+  produced_artifacts:
+  - backend_contract
+  approval_requirements: []
+  memory_scopes:
+  - workflow_run
+  - task
+  route_hints:
+  - analysis
+- key: backend_impl
+  title: Backend implementation
+  assigned_role: backend
+  description_template: Implement the backend API after the contract is finalized.
+  hard_dependencies:
+  - backend_contract
+  soft_dependencies: []
+  required_artifacts:
+  - backend_contract
+  produced_artifacts:
+  - backend_impl
+  approval_requirements: []
+  memory_scopes:
+  - workflow_run
+  - task
+  route_hints:
+  - implementation
+- key: frontend_ui
+  title: Frontend UI
+  assigned_role: frontend
+  description_template: Build the notifications settings page UI.
+  hard_dependencies:
+  - manager_plan
+  soft_dependencies: []
+  required_artifacts:
+  - workflow_plan
+  produced_artifacts:
+  - frontend_ui
+  approval_requirements: []
+  memory_scopes:
+  - workflow_run
+  - task
+  route_hints:
+  - implementation
+- key: integration
+  title: Integration
+  assigned_role: backend
+  description_template: Integrate backend and frontend work and resolve blockers.
+  hard_dependencies:
+  - backend_impl
+  - frontend_ui
+  soft_dependencies: []
+  required_artifacts:
+  - backend_impl
+  - frontend_ui
+  produced_artifacts:
+  - integration_report
+  approval_requirements: []
+  memory_scopes:
+  - workflow_run
+  - task
+  route_hints:
+  - integration
+- key: review
+  title: Review
+  assigned_role: reviewer
+  description_template: Review the integrated changes and approve or reject.
+  hard_dependencies:
+  - integration
+  soft_dependencies: []
+  required_artifacts:
+  - integration_report
+  produced_artifacts:
+  - review_notes
+  approval_requirements:
+  - human_review
+  memory_scopes:
+  - workflow_run
+  - task
+  route_hints:
+  - review
+completion_rules:
+  required_final_states:
+  - integration
+  - review
+  artifact_visibility: dependency_scoped

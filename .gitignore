@@ -1,0 +1,17 @@
+.env
+.env.local
+ergon-*.json
+config/secrets/
+var/
+workspaces/
+workspace/
+tmp/
+dist/
+.venv/
+.DS_Store
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.pyc

@@ -1,0 +1,18 @@
+celery_queue_names:
+- dispatch
+- workers
+- indexing
+- graph
+- observability
+- cleanup
+default_concurrency: 4
+retry_policy:
+  max_attempts: 3
+  backoff_seconds: 15
+heartbeat_intervals:
+  worker: 15
+  lease: 60
+cleanup_schedules:
+  workspace: 0 * * * *
+compaction_thresholds:
+  context_tokens: 12000

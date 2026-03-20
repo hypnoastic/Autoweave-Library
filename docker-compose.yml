@@ -1,0 +1,141 @@
+name: autoweave
+
+x-autoweave-common-env: &autoweave-common-env
+  VERTEXAI_SERVICE_ACCOUNT_FILE: ./config/secrets/vertex_service_account.json
+  GOOGLE_APPLICATION_CREDENTIALS: ./config/secrets/vertex_service_account.json
+  REDIS_URL: redis://redis:6379/0
+  ARTIFACT_STORE_URL: file:///data
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  artifact-store:
+    image: alpine:3.20
+    command:
+      - sh
+      - -lc
+      - mkdir -p /data && tail -f /dev/null
+    volumes:
+      - ./var/artifacts:/data
+    healthcheck:
+      test: ["CMD", "test", "-d", "/data"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  autoweave-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: autoweave-runtime:local
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
+    command:
+      - sh
+      - -lc
+      - sleep infinity
+    working_dir: /workspace
+    depends_on:
+      redis:
+        condition: service_healthy
+      artifact-store:
+        condition: service_healthy
+      openhands-agent-server:
+        condition: service_healthy
+    environment:
+      <<: *autoweave-common-env
+      AUTOWEAVE_RUNTIME_ROOT: /workspace
+      OPENHANDS_AGENT_SERVER_BASE_URL: http://openhands-agent-server:8000
+      PYTHONUNBUFFERED: "1"
+    ports: []
+    volumes:
+      - ./:/workspace:rw
+      - ./var/artifacts:/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-m",
+          "apps.cli.main",
+          "validate",
+          "--root",
+          "/workspace",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+    restart: unless-stopped
+
+  openhands-agent-server:
+    image: ghcr.io/openhands/agent-server:latest-python
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    working_dir: /workspace
+    depends_on:
+      redis:
+        condition: service_healthy
+      artifact-store:
+        condition: service_healthy
+    environment:
+      LOG_ALL_EVENTS: "true"
+      SANDBOX_USER_ID: ${UID:-1000}
+      SANDBOX_VOLUMES: ${PWD:-.}:${PWD:-.}:rw
+      <<: *autoweave-common-env
+      OPENHANDS_AGENT_SERVER_BASE_URL: http://127.0.0.1:8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace:rw
+      - ./:${PWD:-.}:rw
+      - ./var/artifacts:/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  redis-data: {}

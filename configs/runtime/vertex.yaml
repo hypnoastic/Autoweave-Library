@@ -1,0 +1,26 @@
+provider_name: VertexAI
+profile_definitions:
+- name: planner
+  model: gemini-2.5-pro
+  timeout_seconds: 1800
+  max_retries: 2
+- name: balanced
+  model: gemini-2.5-pro
+  timeout_seconds: 1800
+  max_retries: 2
+- name: fast
+  model: gemini-2.5-flash
+  timeout_seconds: 900
+  max_retries: 1
+fallback_order:
+- fast
+- balanced
+- planner
+timeout_policy:
+  dispatch_seconds: 10
+retry_policy:
+  escalate_after_failures: 2
+token_cost_budgets:
+  planner: 120000
+  balanced: 80000
+  fast: 20000
