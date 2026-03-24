@@ -18,7 +18,8 @@ task_templates:
 - key: manager_plan
   title: Manager plan
   assigned_role: manager
-  description_template: Plan the implementation and split work across branches.
+  description_template: Turn the brief into a DAG, split work across branches, and
+    surface missing details.
   hard_dependencies: []
   soft_dependencies: []
   required_artifacts: []
@@ -33,7 +34,8 @@ task_templates:
 - key: backend_contract
   title: Backend contract
   assigned_role: backend
-  description_template: Define API and data contract for notifications settings.
+  description_template: Define the API, data contract, and integration boundaries
+    for the feature.
   hard_dependencies:
   - manager_plan
   soft_dependencies: []
@@ -50,7 +52,8 @@ task_templates:
 - key: backend_impl
   title: Backend implementation
   assigned_role: backend
-  description_template: Implement the backend API after the contract is finalized.
+  description_template: Implement the backend after the contract is finalized and
+    integration points are clear.
   hard_dependencies:
   - backend_contract
   soft_dependencies: []
@@ -67,7 +70,7 @@ task_templates:
 - key: frontend_ui
   title: Frontend UI
   assigned_role: frontend
-  description_template: Build the notifications settings page UI.
+  description_template: Build the user-facing flow with responsive, accessible states.
   hard_dependencies:
   - manager_plan
   soft_dependencies: []
@@ -84,7 +87,8 @@ task_templates:
 - key: integration
   title: Integration
   assigned_role: backend
-  description_template: Integrate backend and frontend work and resolve blockers.
+  description_template: Integrate backend and frontend work, then resolve contract
+    or runtime blockers.
   hard_dependencies:
   - backend_impl
   - frontend_ui
@@ -103,7 +107,8 @@ task_templates:
 - key: review
   title: Review
   assigned_role: reviewer
-  description_template: Review the integrated changes and approve or reject.
+  description_template: Validate the integrated delivery, run quality checks, and
+    approve or reject.
   hard_dependencies:
   - integration
   soft_dependencies: []

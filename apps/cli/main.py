@@ -12,6 +12,7 @@ import typer
 from apps.cli.bootstrap import bootstrap_repository, repository_root
 from apps.cli.validation import ValidationResult, validate_repository
 from autoweave.local_runtime import build_local_runtime
+from autoweave.monitoring import serve_dashboard
 
 app = typer.Typer(help="AutoWeave terminal control plane.")
 
@@ -53,16 +54,23 @@ def validate(root: Path | None = typer.Option(None, "--root", help="Repository r
 
 
 @app.command("bootstrap")
-def bootstrap(root: Path | None = typer.Option(None, "--root", help="Repository root to bootstrap")) -> None:
+def bootstrap(
+    root: Path | None = typer.Option(None, "--root", help="Repository root to bootstrap"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite the sample project files from packaged templates"),
+) -> None:
     """Create missing sample agents and config fixtures."""
     root_path = repository_root(root)
-    result = bootstrap_repository(root_path)
+    result = bootstrap_repository(root_path, overwrite=overwrite)
     if result.created:
         typer.echo("created:")
         for path in result.created:
             typer.echo(f"- {path.relative_to(root_path)}")
     else:
         typer.echo("created=0")
+    if result.updated:
+        typer.echo("updated:")
+        for path in result.updated:
+            typer.echo(f"- {path.relative_to(root_path)}")
 
 
 @app.command("doctor")
@@ -100,6 +108,44 @@ def run_example(
         raise typer.Exit(code=1)
     if not repo_result.ok:
         raise typer.Exit(code=1)
+
+
+@app.command("run-workflow")
+def run_workflow(
+    root: Path | None = typer.Option(None, "--root", help="Repository root to inspect"),
+    request: str = typer.Option(..., "--request", help="User request to seed into the workflow entrypoint"),
+    dispatch: bool = typer.Option(False, "--dispatch/--dry-run", help="Dispatch runnable tasks to OpenHands"),
+    max_steps: int = typer.Option(8, "--max-steps", min=1, help="Maximum runnable tasks to advance in one invocation"),
+) -> None:
+    """Run the current workflow from a user request instead of the fixed sample brief."""
+    root_path = repository_root(root)
+    repo_result = validate_repository(root_path)
+    _echo_validation_result(root_path, repo_result)
+    with build_local_runtime(root=root_path) as runtime:
+        report = runtime.run_workflow(request=request, dispatch=dispatch, max_steps=max_steps)
+
+    for line in report.summary_lines():
+        typer.echo(line)
+    if dispatch and report.workflow_status == "failed" and not report.open_human_questions:
+        raise typer.Exit(code=1)
+    if not repo_result.ok:
+        raise typer.Exit(code=1)
+
+
+@app.command("ui")
+def ui(
+    root: Path | None = typer.Option(None, "--root", help="Project root to monitor"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind the local monitoring UI to"),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Port for the local monitoring UI"),
+) -> None:
+    """Launch the lightweight local monitoring UI."""
+    root_path = repository_root(root)
+    repo_result = validate_repository(root_path)
+    _echo_validation_result(root_path, repo_result)
+    typer.echo(f"ui_url=http://{host}:{port}")
+    if not repo_result.ok:
+        raise typer.Exit(code=1)
+    serve_dashboard(root=root_path, host=host, port=port)
 
 
 @app.command("new-project")

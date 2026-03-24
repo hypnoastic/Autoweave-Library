@@ -29,6 +29,7 @@ class OpenHandsWorkerConfig(BaseModel):
     task_role: str
     task_title: str
     task_description: str
+    task_input_json: JsonDict = Field(default_factory=dict)
     route_reason: str
     permission_mode: str = "workspace-write"
     tool_groups: list[str] = Field(default_factory=list)
@@ -70,6 +71,7 @@ class OpenHandsConfigCompiler:
             task_role=task.assigned_role,
             task_title=task.title,
             task_description=task.description,
+            task_input_json=task.input_json,
             route_reason=route.route_reason,
             permission_mode=str(runtime_policy.get("permission_mode", "workspace-write")),
             tool_groups=list(runtime_policy.get("tool_groups", self.default_tool_groups)),

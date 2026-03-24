@@ -291,6 +291,7 @@ def test_openhands_client_bootstrap_uses_httpx_and_api_key() -> None:
     assert [tool["name"] for tool in calls[1]["body"]["agent"]["tools"]] == ["terminal", "file_editor", "task_tracker"]
     assert calls[1]["body"]["agent"]["tools"][0]["params"] == {}
     assert calls[1]["body"]["initial_message"]["content"][0]["text"].startswith("Task ID: task-1")
+    assert "Task Input JSON:" not in calls[1]["body"]["initial_message"]["content"][0]["text"]
 
 
 def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeypatch) -> None:
@@ -339,6 +340,7 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
     assert persisted_graph.workflow_run.status.value == "running"
     assert calls[2]["body"]["agent"]["llm"]["reasoning_effort"] == "none"
     assert calls[2]["body"]["agent"]["llm"]["model"] == "vertex_ai/gemini-3.1-pro-preview"
+    assert '"user_request": "build a clothing storefront"' not in calls[2]["body"]["initial_message"]["content"][0]["text"]
     assert [entry["path"] for entry in calls] == [
         "/health",
         "/health",
@@ -347,6 +349,71 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
         "/api/conversations/conversation-1",
         "/api/conversations/conversation-1/events/search",
     ]
+
+
+def test_local_runtime_run_workflow_propagates_request_and_advances_multiple_tasks(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        report = runtime.run_workflow(
+            request="Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing.",
+            dispatch=True,
+            max_steps=4,
+        )
+
+    assert report.workflow_status == "running"
+    assert report.dispatched_task_keys[0] == "manager_plan"
+    assert set(report.dispatched_task_keys[1:3]) == {"backend_contract", "frontend_ui"}
+    assert report.dispatched_task_keys[3] == "backend_impl"
+    assert report.dispatched_task_keys.index("backend_contract") < report.dispatched_task_keys.index("backend_impl")
+    assert report.open_human_questions == ()
+    conversation_calls = [call for call in calls if call["path"] == "/api/conversations"]
+    assert len(conversation_calls) == 4
+    first_prompt = conversation_calls[0]["body"]["initial_message"]["content"][0]["text"]
+    assert "Task Input JSON:" in first_prompt
+    assert '"user_request": "Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing."' in first_prompt
+
+
+def test_local_runtime_run_workflow_stops_on_human_input_request(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        report = runtime.run_workflow(
+            request="Build a small clothing ecommerce site.",
+            dispatch=True,
+            stream_events_by_task={
+                "manager_plan": (
+                    {
+                        "kind": "MessageEvent",
+                        "source": "agent",
+                        "llm_message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "HUMAN_INPUT_REQUIRED: Which payment providers and shipping regions should the first release support?",
+                                }
+                            ],
+                            "tool_calls": None,
+                        },
+                    },
+                ),
+            },
+        )
+
+    assert report.dispatched_task_keys == ("manager_plan",)
+    assert report.workflow_status == "running"
+    assert report.open_human_questions == (
+        "Which payment providers and shipping regions should the first release support?",
+    )
+    assert report.step_reports[0].attempt_state == "needs_input"
+    assert report.step_reports[0].task_state == "waiting_for_human"
 
 
 def test_cli_doctor_and_run_example_use_composed_runtime(tmp_path: Path, monkeypatch) -> None:
@@ -379,6 +446,40 @@ def test_cli_doctor_and_run_example_use_composed_runtime(tmp_path: Path, monkeyp
     assert "openhands_health=ok" in run_result.stdout
     assert "launch_provider=VertexAI" in run_result.stdout
     assert "bootstrap_call=" not in run_result.stdout
+
+
+def test_cli_run_workflow_uses_composed_runtime(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    def fake_build_local_runtime(*, root=None, environ=None, transport=None, bootstrap_path="/api/conversations"):
+        return build_local_runtime(
+            root=root,
+            environ={},
+            transport=transport or fake_transport,
+            bootstrap_path=bootstrap_path,
+        )
+
+    fake_transport = transport
+    monkeypatch.setattr(cli_main, "build_local_runtime", fake_build_local_runtime)
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    result = runner.invoke(
+        cli_main.app,
+        [
+            "run-workflow",
+            "--root",
+            str(tmp_path),
+            "--request",
+            "Build a small clothing ecommerce website and ask if checkout details are missing.",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "validation=ok" in result.stdout
+    assert "workflow_run_id=" in result.stdout
+    assert "request=Build a small clothing ecommerce website and ask if checkout details are missing." in result.stdout
 
 
 def test_local_runtime_can_force_legacy_vertex_profile(tmp_path: Path, monkeypatch) -> None:

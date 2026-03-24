@@ -105,6 +105,58 @@ class LocalExampleRunReport:
         return lines
 
 
+@dataclass(slots=True, frozen=True)
+class LocalTaskRunReport:
+    workflow_run_id: str
+    task_key: str
+    route_model_name: str
+    launch_payload: JsonDict
+    openhands_health: OpenHandsServiceCall
+    bootstrap_call: OpenHandsServiceCall | None
+    published_event: EventRecord
+    task_state: str
+    attempt_state: str
+    workflow_status: str
+    stream_event_types: tuple[str, ...]
+    artifact_ids: tuple[str, ...]
+    failure_reason: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class LocalWorkflowRunReport:
+    workflow_run_id: str
+    request: str
+    workflow_status: str
+    dispatched_task_keys: tuple[str, ...]
+    ready_task_keys: tuple[str, ...]
+    open_human_questions: tuple[str, ...]
+    open_approval_reasons: tuple[str, ...]
+    step_reports: tuple[LocalTaskRunReport, ...]
+
+    def summary_lines(self) -> list[str]:
+        lines = [
+            f"workflow_run_id={self.workflow_run_id}",
+            f"request={self.request}",
+            f"workflow_status={self.workflow_status}",
+            f"dispatched_tasks={', '.join(self.dispatched_task_keys) or 'none'}",
+            f"ready_tasks={', '.join(self.ready_task_keys) or 'none'}",
+            f"open_human_questions={len(self.open_human_questions)}",
+            f"open_approval_requests={len(self.open_approval_reasons)}",
+        ]
+        for index, step in enumerate(self.step_reports, start=1):
+            lines.append(
+                "step_"
+                f"{index}={step.task_key}:{step.task_state}:{step.attempt_state}:{step.route_model_name}"
+            )
+            if step.failure_reason:
+                lines.append(f"step_{index}_failure={step.failure_reason}")
+        for index, question in enumerate(self.open_human_questions, start=1):
+            lines.append(f"human_question_{index}={question}")
+        for index, reason in enumerate(self.open_approval_reasons, start=1):
+            lines.append(f"approval_reason_{index}={reason}")
+        return lines
+
+
 @dataclass(slots=True)
 class LocalRuntime:
     settings: LocalEnvironmentSettings
@@ -229,17 +281,32 @@ class LocalRuntime:
 
     def _reset_example_workflow_run(self) -> None:
         workflow_definition_id = f"{self.workflow_definition.name}:{self.workflow_definition.version}"
+        self._reset_workflow_run(
+            workflow_run_id=f"{workflow_definition_id.replace(':', '_')}_run_{generate_id('demo')}",
+        )
+
+    def _reset_workflow_run(
+        self,
+        *,
+        workflow_run_id: str | None = None,
+        root_input_json: JsonDict | None = None,
+    ) -> None:
+        workflow_definition_id = f"{self.workflow_definition.name}:{self.workflow_definition.version}"
         fresh_graph = build_workflow_graph(
             self.workflow_definition,
             project_id="local",
             team_id="local",
             workflow_definition_id=workflow_definition_id,
-            workflow_run_id=f"{workflow_definition_id.replace(':', '_')}_run_{generate_id('demo')}",
+            workflow_run_id=workflow_run_id or f"{workflow_definition_id.replace(':', '_')}_run_{generate_id('demo')}",
+            root_input_json=root_input_json or {},
         )
         self.storage.workflow_repository.save_graph(fresh_graph)
         canonical_graph = self.storage.workflow_repository.get_graph(fresh_graph.workflow_run.id)
         self.orchestration = OrchestrationService(WorkflowRunState.from_graph(canonical_graph))
         self._last_persisted_graph_signature = self._graph_structure_signature()
+
+    def _task_template(self, task_key: str):
+        return next(template for template in self.workflow_definition.task_templates if template.key == task_key)
 
     def _sync_canonical_state(self) -> None:
         """Persist the authoritative orchestration snapshot through the repository wiring."""
@@ -583,7 +650,7 @@ class LocalRuntime:
                 self._sync_canonical_state()
                 current_task = self.orchestration.state.task(current_task.id)
                 current_attempt = self.orchestration.state.attempt(current_attempt.id)
-                continue
+                break
             if stream_event.approval_required:
                 self.orchestration.pause_attempt(current_attempt.id)
                 self.orchestration.request_approval(
@@ -595,7 +662,7 @@ class LocalRuntime:
                 self._sync_canonical_state()
                 current_task = self.orchestration.state.task(current_task.id)
                 current_attempt = self.orchestration.state.attempt(current_attempt.id)
-                continue
+                break
 
             artifact = stream_event_to_artifact(stream_event, task=current_task, attempt=current_attempt)
             if artifact is not None:
@@ -649,46 +716,14 @@ class LocalRuntime:
                 break
         return current_task, current_attempt, tuple(emitted_types), tuple(artifact_ids)
 
-    def doctor(self) -> LocalRuntimeDoctorReport:
-        ready_task_keys = tuple(
-            self.orchestration.state.task(task_id).task_key
-            for task_id in self.orchestration.schedule().ready_tasks
-        )
-        return LocalRuntimeDoctorReport(
-            project_root=self.settings.project_root,
-            loaded_env_files=self.settings.loaded_env_files,
-            config_paths={
-                "workflow": self.settings.resolve_config_path(self.settings.autoweave_default_workflow),
-                "runtime": self.settings.resolve_config_path(self.settings.autoweave_runtime_config),
-                "storage": self.settings.resolve_config_path(self.settings.autoweave_storage_config),
-                "vertex": self.settings.resolve_config_path(self.settings.autoweave_vertex_config),
-                "observability": self.settings.resolve_config_path(self.settings.autoweave_observability_config),
-            },
-            vertex_worker_env=self.settings.worker_environment(),
-            postgres_target=json.dumps(self.settings.postgres_target().redacted_dump(), sort_keys=True),
-            neo4j_target=json.dumps(self.settings.neo4j_target().redacted_dump(), sort_keys=True),
-            redis_target=json.dumps(self.settings.redis_target().redacted_dump(), sort_keys=True),
-            artifact_store_path=self.settings.artifact_store_path(),
-            openhands_target=self.settings.openhands_target().base_url,
-            openhands_health=self.openhands_client.health_probe(),
-            ready_task_keys=ready_task_keys,
-        )
-
-    def run_example(
+    def _run_task(
         self,
         *,
-        dispatch: bool = False,
+        task: TaskRecord,
+        dispatch: bool,
         stream_events: Iterable[Mapping[str, Any] | OpenHandsStreamEvent] | None = None,
-    ) -> LocalExampleRunReport:
-        schedule = self.orchestration.schedule()
-        if not schedule.ready_tasks:
-            self._reset_example_workflow_run()
-            schedule = self.orchestration.schedule()
-        if not schedule.ready_tasks:
-            raise RuntimeError("example workflow has no runnable tasks")
-
-        task = self.orchestration.state.task(schedule.ready_tasks[0])
-        template = next(template for template in self.workflow_definition.task_templates if template.key == task.task_key)
+    ) -> LocalTaskRunReport:
+        template = self._task_template(task.task_key)
         attempt = self.orchestration.open_attempt(
             task_id=task.id,
             agent_definition_id=f"{task.assigned_role}-agent",
@@ -790,10 +825,9 @@ class LocalRuntime:
                 self._sync_canonical_state()
         else:
             self._sync_canonical_state()
-        return LocalExampleRunReport(
+        return LocalTaskRunReport(
             workflow_run_id=final_task.workflow_run_id,
             task_key=final_task.task_key,
-            ready_task_keys=tuple(self.orchestration.state.task(task_id).task_key for task_id in schedule.ready_tasks),
             route_model_name=route.model_name,
             launch_payload=launch_payload,
             openhands_health=health,
@@ -805,6 +839,126 @@ class LocalRuntime:
             stream_event_types=processed_stream_events,
             artifact_ids=artifact_ids,
             failure_reason=failure_reason,
+        )
+
+    def doctor(self) -> LocalRuntimeDoctorReport:
+        ready_task_keys = tuple(
+            self.orchestration.state.task(task_id).task_key
+            for task_id in self.orchestration.schedule().ready_tasks
+        )
+        return LocalRuntimeDoctorReport(
+            project_root=self.settings.project_root,
+            loaded_env_files=self.settings.loaded_env_files,
+            config_paths={
+                "workflow": self.settings.resolve_config_path(self.settings.autoweave_default_workflow),
+                "runtime": self.settings.resolve_config_path(self.settings.autoweave_runtime_config),
+                "storage": self.settings.resolve_config_path(self.settings.autoweave_storage_config),
+                "vertex": self.settings.resolve_config_path(self.settings.autoweave_vertex_config),
+                "observability": self.settings.resolve_config_path(self.settings.autoweave_observability_config),
+            },
+            vertex_worker_env=self.settings.worker_environment(),
+            postgres_target=json.dumps(self.settings.postgres_target().redacted_dump(), sort_keys=True),
+            neo4j_target=json.dumps(self.settings.neo4j_target().redacted_dump(), sort_keys=True),
+            redis_target=json.dumps(self.settings.redis_target().redacted_dump(), sort_keys=True),
+            artifact_store_path=self.settings.artifact_store_path(),
+            openhands_target=self.settings.openhands_target().base_url,
+            openhands_health=self.openhands_client.health_probe(),
+            ready_task_keys=ready_task_keys,
+        )
+
+    def run_example(
+        self,
+        *,
+        dispatch: bool = False,
+        stream_events: Iterable[Mapping[str, Any] | OpenHandsStreamEvent] | None = None,
+    ) -> LocalExampleRunReport:
+        schedule = self.orchestration.schedule()
+        if not schedule.ready_tasks:
+            self._reset_example_workflow_run()
+            schedule = self.orchestration.schedule()
+        if not schedule.ready_tasks:
+            raise RuntimeError("example workflow has no runnable tasks")
+
+        task = self.orchestration.state.task(schedule.ready_tasks[0])
+        task_report = self._run_task(
+            task=task,
+            dispatch=dispatch,
+            stream_events=stream_events,
+        )
+        return LocalExampleRunReport(
+            workflow_run_id=task_report.workflow_run_id,
+            task_key=task_report.task_key,
+            ready_task_keys=tuple(self.orchestration.state.task(task_id).task_key for task_id in schedule.ready_tasks),
+            route_model_name=task_report.route_model_name,
+            launch_payload=task_report.launch_payload,
+            openhands_health=task_report.openhands_health,
+            bootstrap_call=task_report.bootstrap_call,
+            published_event=task_report.published_event,
+            task_state=task_report.task_state,
+            attempt_state=task_report.attempt_state,
+            workflow_status=task_report.workflow_status,
+            stream_event_types=task_report.stream_event_types,
+            artifact_ids=task_report.artifact_ids,
+            failure_reason=task_report.failure_reason,
+        )
+
+    def run_workflow(
+        self,
+        *,
+        request: str,
+        dispatch: bool = False,
+        max_steps: int = 8,
+        stream_events_by_task: Mapping[str, Iterable[Mapping[str, Any] | OpenHandsStreamEvent]] | None = None,
+    ) -> LocalWorkflowRunReport:
+        self._reset_workflow_run(root_input_json={"user_request": request})
+        step_reports: list[LocalTaskRunReport] = []
+        remaining_steps = 1 if not dispatch else max(1, max_steps)
+
+        while remaining_steps > 0:
+            schedule = self.orchestration.schedule()
+            if not schedule.ready_tasks:
+                break
+            stop_after_iteration = False
+            for task_id in list(schedule.ready_tasks):
+                task = self.orchestration.state.task(task_id)
+                task_stream = None
+                if stream_events_by_task is not None:
+                    task_stream = stream_events_by_task.get(task.task_key)
+                step_report = self._run_task(task=task, dispatch=dispatch, stream_events=task_stream)
+                step_reports.append(step_report)
+                remaining_steps -= 1
+                if step_report.attempt_state in {"needs_input", "paused"} or step_report.task_state in {
+                    "waiting_for_human",
+                    "waiting_for_approval",
+                }:
+                    stop_after_iteration = True
+                    break
+                if not dispatch or remaining_steps <= 0:
+                    stop_after_iteration = True
+                    break
+            if stop_after_iteration:
+                break
+
+        final_schedule = self.orchestration.schedule()
+        open_human_questions = tuple(
+            request.question
+            for request in self.orchestration.state.human_requests.values()
+            if request.status.value == "open"
+        )
+        open_approval_reasons = tuple(
+            request.reason
+            for request in self.orchestration.state.approval_requests.values()
+            if request.status.value == "requested"
+        )
+        return LocalWorkflowRunReport(
+            workflow_run_id=self.orchestration.state.graph.workflow_run.id,
+            request=request,
+            workflow_status=self.orchestration.state.graph.workflow_run.status.value,
+            dispatched_task_keys=tuple(step.task_key for step in step_reports),
+            ready_task_keys=tuple(self.orchestration.state.task(task_id).task_key for task_id in final_schedule.ready_tasks),
+            open_human_questions=open_human_questions,
+            open_approval_reasons=open_approval_reasons,
+            step_reports=tuple(step_reports),
         )
 
 

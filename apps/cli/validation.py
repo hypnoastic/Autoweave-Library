@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from apps.cli.bootstrap import AGENT_ROLES, DOC_FILES, RUNTIME_FILES, ROUTING_FILE, WORKFLOW_FILE
+from apps.cli.bootstrap import AGENT_ROLES, RUNTIME_FILES, ROUTING_FILE, WORKFLOW_FILE, expected_repository_files
 
 
 @dataclass(frozen=True)
@@ -29,23 +29,10 @@ def validate_repository(root: Path) -> ValidationResult:
     missing: list[Path] = []
     invalid: list[str] = []
 
-    required_paths = list(DOC_FILES) + [WORKFLOW_FILE, ROUTING_FILE, *RUNTIME_FILES]
-    for relative in required_paths:
-        path = root / relative
+    for path in expected_repository_files(root):
         checked.append(path)
         if not path.exists():
             missing.append(path)
-
-    for role in AGENT_ROLES:
-        for relative in (
-            Path("agents") / role / "soul.md",
-            Path("agents") / role / "playbook.yaml",
-            Path("agents") / role / "autoweave.yaml",
-        ):
-            path = root / relative
-            checked.append(path)
-            if not path.exists():
-                missing.append(path)
 
     if not missing:
         invalid.extend(_validate_yaml_contracts(root))

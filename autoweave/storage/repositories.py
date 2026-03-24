@@ -9,6 +9,9 @@ from typing import Iterable
 from autoweave.models import (
     AttemptState,
     ArtifactRecord,
+    ApprovalRequestRecord,
+    EventRecord,
+    HumanRequestRecord,
     TaskAttemptRecord,
     TaskEdgeRecord,
     TaskRecord,
@@ -34,21 +37,40 @@ class InMemoryWorkflowRepository:
         self._task_key_index: dict[tuple[str, str], str] = {}
         self._attempts: dict[str, TaskAttemptRecord] = {}
         self._attempts_by_run: dict[str, list[str]] = defaultdict(list)
+        self._graphs_order: list[str] = []
+        self._artifacts: dict[str, ArtifactRecord] = {}
+        self._artifacts_by_run: dict[str, list[str]] = defaultdict(list)
+        self._artifacts_by_task: dict[str, list[str]] = defaultdict(list)
+        self._events: dict[str, EventRecord] = {}
+        self._events_by_run: dict[str, list[str]] = defaultdict(list)
+        self._human_requests: dict[str, HumanRequestRecord] = {}
+        self._human_requests_by_run: dict[str, list[str]] = defaultdict(list)
+        self._approval_requests: dict[str, ApprovalRequestRecord] = {}
+        self._approval_requests_by_run: dict[str, list[str]] = defaultdict(list)
 
     def save_graph(self, graph: WorkflowGraph) -> WorkflowGraph:
         snapshot = graph.model_copy(deep=True)
         self._graphs[snapshot.workflow_run.id] = snapshot
+        if snapshot.workflow_run.id not in self._graphs_order:
+            self._graphs_order.append(snapshot.workflow_run.id)
         for task in snapshot.tasks:
             self._tasks[task.id] = task.model_copy(deep=True)
             self._task_to_run[task.id] = snapshot.workflow_run.id
             self._task_key_index[(snapshot.workflow_run.id, task.task_key)] = task.id
         return snapshot
 
+    def list_workflow_runs(self) -> list[WorkflowRunRecord]:
+        runs = [self._graphs[run_id].workflow_run.model_copy(deep=True) for run_id in self._graphs_order if run_id in self._graphs]
+        return runs
+
     def get_graph(self, workflow_run_id: str) -> WorkflowGraph:
         try:
             return self._graphs[workflow_run_id].model_copy(deep=True)
         except KeyError as exc:
             raise KeyError(f"workflow run {workflow_run_id!r} is not registered") from exc
+
+    def list_tasks_for_run(self, workflow_run_id: str) -> list[TaskRecord]:
+        return [task.model_copy(deep=True) for task in self.get_graph(workflow_run_id).tasks]
 
     def save_task(self, task: TaskRecord) -> TaskRecord:
         record = task.model_copy(deep=True)
@@ -73,6 +95,10 @@ class InMemoryWorkflowRepository:
                 attempt_ids.append(record.id)
         return record
 
+    def list_attempts_for_run(self, workflow_run_id: str) -> list[TaskAttemptRecord]:
+        attempt_ids = self._attempts_by_run.get(workflow_run_id, [])
+        return [self._attempts[attempt_id].model_copy(deep=True) for attempt_id in attempt_ids if attempt_id in self._attempts]
+
     def update_attempt_state(self, attempt_id: str, state: AttemptState) -> TaskAttemptRecord:
         attempt = self.get_attempt(attempt_id)
         updated = attempt.transition(state)
@@ -87,6 +113,62 @@ class InMemoryWorkflowRepository:
             if attempt is not None and attempt.state in active_states:
                 active_attempts.append(attempt.model_copy(deep=True))
         return active_attempts
+
+    def list_human_requests_for_run(self, workflow_run_id: str) -> list[HumanRequestRecord]:
+        return [
+            self._human_requests[request_id].model_copy(deep=True)
+            for request_id in self._human_requests_by_run.get(workflow_run_id, [])
+            if request_id in self._human_requests
+        ]
+
+    def save_human_request(self, request: HumanRequestRecord) -> HumanRequestRecord:
+        record = request.model_copy(deep=True)
+        self._human_requests[record.id] = record
+        if record.id not in self._human_requests_by_run[record.workflow_run_id]:
+            self._human_requests_by_run[record.workflow_run_id].append(record.id)
+        return record
+
+    def list_approval_requests_for_run(self, workflow_run_id: str) -> list[ApprovalRequestRecord]:
+        return [
+            self._approval_requests[request_id].model_copy(deep=True)
+            for request_id in self._approval_requests_by_run.get(workflow_run_id, [])
+            if request_id in self._approval_requests
+        ]
+
+    def save_approval_request(self, request: ApprovalRequestRecord) -> ApprovalRequestRecord:
+        record = request.model_copy(deep=True)
+        self._approval_requests[record.id] = record
+        if record.id not in self._approval_requests_by_run[record.workflow_run_id]:
+            self._approval_requests_by_run[record.workflow_run_id].append(record.id)
+        return record
+
+    def list_artifacts_for_run(self, workflow_run_id: str) -> list[ArtifactRecord]:
+        artifact_ids = self._artifacts_by_run.get(workflow_run_id, [])
+        return [self._artifacts[artifact_id].model_copy(deep=True) for artifact_id in artifact_ids if artifact_id in self._artifacts]
+
+    def list_artifacts_for_task(self, task_id: str) -> list[ArtifactRecord]:
+        artifact_ids = self._artifacts_by_task.get(task_id, [])
+        return [self._artifacts[artifact_id].model_copy(deep=True) for artifact_id in artifact_ids if artifact_id in self._artifacts]
+
+    def save_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
+        record = artifact.model_copy(deep=True)
+        self._artifacts[record.id] = record
+        if record.id not in self._artifacts_by_run[record.workflow_run_id]:
+            self._artifacts_by_run[record.workflow_run_id].append(record.id)
+        if record.id not in self._artifacts_by_task[record.task_id]:
+            self._artifacts_by_task[record.task_id].append(record.id)
+        return record
+
+    def list_events(self, workflow_run_id: str) -> list[EventRecord]:
+        event_ids = self._events_by_run.get(workflow_run_id, [])
+        return [self._events[event_id].model_copy(deep=True) for event_id in event_ids if event_id in self._events]
+
+    def save_event(self, event: EventRecord) -> EventRecord:
+        record = event.model_copy(deep=True)
+        self._events[record.id] = record
+        if record.id not in self._events_by_run[record.workflow_run_id]:
+            self._events_by_run[record.workflow_run_id].append(record.id)
+        return record
 
     def get_task(self, task_id: str) -> TaskRecord:
         try:

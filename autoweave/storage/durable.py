@@ -215,6 +215,20 @@ class SQLiteWorkflowRepository:
         edges = [TaskEdgeRecord.model_validate_json(row["data_json"]) for row in edge_rows]
         return WorkflowGraph(workflow_run=workflow_run, tasks=tasks, edges=edges)
 
+    def list_workflow_runs(self) -> list[WorkflowRunRecord]:
+        with _connect(self.database_path) as conn:
+            rows = conn.execute("SELECT data_json FROM workflow_runs").fetchall()
+        runs = [WorkflowRunRecord.model_validate_json(row["data_json"]) for row in rows]
+        runs.sort(
+            key=lambda item: (
+                item.started_at.isoformat() if item.started_at is not None else "",
+                item.ended_at.isoformat() if item.ended_at is not None else "",
+                item.id,
+            ),
+            reverse=True,
+        )
+        return runs
+
     def save_workflow_definition(
         self,
         workflow_definition: WorkflowDefinitionRecord,
@@ -321,6 +335,14 @@ class SQLiteWorkflowRepository:
                 raise KeyError(f"task {task_id!r} is not registered")
             return TaskRecord.model_validate_json(row["data_json"])
 
+    def list_tasks_for_run(self, workflow_run_id: str) -> list[TaskRecord]:
+        with _connect(self.database_path) as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM tasks WHERE workflow_run_id = ? ORDER BY task_key",
+                (workflow_run_id,),
+            ).fetchall()
+        return [TaskRecord.model_validate_json(row["data_json"]) for row in rows]
+
     def get_task_by_key(self, workflow_run_id: str, task_key: str) -> TaskRecord:
         with _connect(self.database_path) as conn:
             row = conn.execute(
@@ -369,6 +391,14 @@ class SQLiteWorkflowRepository:
                 raise KeyError(f"attempt {attempt_id!r} is not registered")
             return TaskAttemptRecord.model_validate_json(row["data_json"])
 
+    def list_attempts_for_run(self, workflow_run_id: str) -> list[TaskAttemptRecord]:
+        with _connect(self.database_path) as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM attempts WHERE workflow_run_id = ? ORDER BY attempt_number, rowid",
+                (workflow_run_id,),
+            ).fetchall()
+        return [TaskAttemptRecord.model_validate_json(row["data_json"]) for row in rows]
+
     def graph_for_task(self, task_id: str) -> WorkflowGraph:
         task = self.get_task(task_id)
         return self.get_graph(task.workflow_run_id)
@@ -415,6 +445,14 @@ class SQLiteWorkflowRepository:
             self._save_human_request(record, conn)
         return record
 
+    def list_human_requests_for_run(self, workflow_run_id: str) -> list[HumanRequestRecord]:
+        with _connect(self.database_path) as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM human_requests WHERE workflow_run_id = ? ORDER BY rowid",
+                (workflow_run_id,),
+            ).fetchall()
+        return [HumanRequestRecord.model_validate_json(row["data_json"]) for row in rows]
+
     def get_human_request(self, request_id: str) -> HumanRequestRecord:
         with _connect(self.database_path) as conn:
             row = conn.execute(
@@ -430,6 +468,14 @@ class SQLiteWorkflowRepository:
         with _connect(self.database_path) as conn:
             self._save_approval_request(record, conn)
         return record
+
+    def list_approval_requests_for_run(self, workflow_run_id: str) -> list[ApprovalRequestRecord]:
+        with _connect(self.database_path) as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM approval_requests WHERE workflow_run_id = ? ORDER BY rowid",
+                (workflow_run_id,),
+            ).fetchall()
+        return [ApprovalRequestRecord.model_validate_json(row["data_json"]) for row in rows]
 
     def save_runtime_state(
         self,

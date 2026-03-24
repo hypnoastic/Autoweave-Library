@@ -74,6 +74,7 @@ def test_packaged_fresh_install_demo(tmp_path: Path) -> None:
             import httpx
             from typer.testing import CliRunner
 
+            from autoweave.templates import sample_project
             from apps.cli import main as cli_main
 
             root = pathlib.Path(sys.argv[1])
@@ -139,6 +140,7 @@ def test_packaged_fresh_install_demo(tmp_path: Path) -> None:
                 return FakeRuntime(transport, bootstrap_path)
 
             cli_main.build_local_runtime = fake_build_local_runtime
+            cli_main.serve_dashboard = lambda **kwargs: None
 
             runner = CliRunner()
             env = {
@@ -160,15 +162,27 @@ def test_packaged_fresh_install_demo(tmp_path: Path) -> None:
             validate = runner.invoke(cli_main.app, ["validate", "--root", str(root)], env=env)
             doctor = runner.invoke(cli_main.app, ["doctor", "--root", str(root)], env=env)
             run_example = runner.invoke(cli_main.app, ["run-example", "--root", str(root), "--dispatch"], env=env)
+            ui = runner.invoke(cli_main.app, ["ui", "--root", str(root), "--port", "8765"], env=env)
+
+            manager_skill = root / "agents" / "manager" / "skills" / "workflow_decomposition.md"
+            reviewer_skill = root / "agents" / "reviewer" / "skills" / "qa_validation.md"
 
             assert bootstrap.exit_code == 0, bootstrap.output
             assert validate.exit_code == 0, validate.output
             assert doctor.exit_code == 0, doctor.output
             assert run_example.exit_code == 0, run_example.output
+            assert ui.exit_code == 0, ui.output
             assert "created:" in bootstrap.output
             assert "validation=ok" in validate.output
             assert "openhands_health=ok" in doctor.output
             assert "bootstrap_call=ok" in run_example.output
+            assert "ui_url=http://127.0.0.1:8765" in ui.output
+            assert manager_skill.exists()
+            assert reviewer_skill.exists()
+            assert "## Do" in manager_skill.read_text(encoding="utf-8")
+            assert "## Do" in reviewer_skill.read_text(encoding="utf-8")
+            assert sample_project.AGENT_ROLES == ("manager", "backend", "frontend", "reviewer")
+            assert sample_project.WORKFLOW_FILE.as_posix() == "configs/workflows/team.workflow.yaml"
             assert any(call["path"] == "/api/conversations" for call in calls)
             """
         ),

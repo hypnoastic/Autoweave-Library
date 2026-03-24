@@ -2,6 +2,8 @@
 
 AutoWeave is a terminal-first orchestration library. It owns canonical workflow state, DAG scheduling, approvals, artifact routing, context retrieval, model routing, and observability. OpenHands is the worker runtime. PostgreSQL is canonical truth. Redis is ephemeral coordination. Neo4j is a projection/query layer. Vertex AI is the model platform.
 
+Bundled sample project scaffolding is now treated as library-packaged template content under `autoweave.templates`, rather than being owned inline by the CLI implementation. The repo still keeps root sample assets for compatibility, but fresh-project bootstrap flows should treat the installed library package as the canonical template source.
+
 ## Local architecture
 
 - Neon Postgres stays remote and canonical.
@@ -48,9 +50,28 @@ python3 -m apps.cli.main bootstrap --root .
 python3 -m apps.cli.main validate --root .
 python3 -m apps.cli.main doctor --root .
 python3 -m apps.cli.main run-example --root . --dispatch
+python3 -m apps.cli.main ui --root .
 ```
 
 `run-example --dispatch` uses the built-in notifications-settings workflow example. It will exit non-zero if the worker run fails. In the current validation environment, the local OpenHands path reaches Vertex successfully; the remaining live limitation is runtime quality under external Vertex behavior such as rate limiting or long-running conversations.
+
+## Monitoring UI
+
+Launch the lightweight local dashboard:
+
+```bash
+python3 -m apps.cli.main ui --root . --host 127.0.0.1 --port 8765
+```
+
+The dashboard lets you:
+
+- submit a user request into the current workflow
+- inspect the current workflow blueprint and task dependencies
+- see recent workflow runs from canonical storage
+- monitor task states, attempts, models, and workspace paths
+- inspect artifacts, human blockers, approval blockers, and recent events
+
+The UI is intentionally lightweight and local. It is an operator/debugging surface over canonical AutoWeave state, not a second orchestrator and not a product UI.
 
 ## Tests
 
@@ -101,6 +122,7 @@ Then bootstrap and run the installed CLI:
 /tmp/autoweave-demo-venv/bin/autoweave validate --root /tmp/autoweave-demo-project
 /tmp/autoweave-demo-venv/bin/autoweave doctor --root /tmp/autoweave-demo-project
 /tmp/autoweave-demo-venv/bin/autoweave run-example --root /tmp/autoweave-demo-project --dispatch
+/tmp/autoweave-demo-venv/bin/autoweave ui --root /tmp/autoweave-demo-project
 ```
 
 ## Current status

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
+import json
 from typing import Any, Mapping
 
 import yaml
@@ -91,13 +92,15 @@ def build_workflow_graph(
 
     tasks: list[TaskRecord] = []
     tasks_by_key: dict[str, TaskRecord] = {}
+    root_payload = dict(root_input_json or {})
     for template in definition.task_templates:
         task = TaskRecord(
             workflow_run_id=workflow_run.id,
             task_key=template.key,
             title=template.title,
-            description=template.description_template,
+            description=_render_template(template.description_template, root_payload),
             assigned_role=template.assigned_role,
+            input_json=dict(root_payload) if template.key == definition.entrypoint and root_payload else {},
             required_artifact_types_json=list(template.required_artifacts),
             produced_artifact_types_json=list(template.produced_artifacts),
         )
@@ -311,3 +314,20 @@ def _topological_order(task_templates: dict[str, TaskTemplateConfig]) -> list[st
     if len(ordered) != len(task_templates):
         raise ValueError("workflow graph contains a cycle")
     return ordered
+
+
+class _SafeTemplateDict(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _render_template(template: str, values: Mapping[str, Any]) -> str:
+    if not values:
+        return template
+    rendered_values = _SafeTemplateDict(
+        {
+            key: value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+            for key, value in values.items()
+        }
+    )
+    return template.format_map(rendered_values)

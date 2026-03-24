@@ -1,6 +1,6 @@
 name: manager-agent
 role: manager
-description: AutoWeave sample manager agent
+description: AutoWeave sample manager agent focused on workflow decomposition.
 allowed_workflow_stages:
 - planning
 - implementation
@@ -14,12 +14,16 @@ allowed_tool_groups:
 - context
 - artifacts
 - approvals
-- workspace
+- workflow
 sandbox_profile: isolated-worktree
 model_profile_hints:
-- balanced
+- planner
 approval_policy: request-before-risky-action
 human_interaction_policy: request-clarification-through-orchestrator
+specialization: workflow-decomposition
+primary_skills:
+- workflow_decomposition
+- stakeholder_alignment
 artifact_contracts:
 - artifact_type: manager_notes
   visibility: upstream

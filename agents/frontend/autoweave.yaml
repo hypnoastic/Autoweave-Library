@@ -1,6 +1,6 @@
 name: frontend-agent
 role: frontend
-description: AutoWeave sample frontend agent
+description: AutoWeave sample frontend agent focused on ui delivery.
 allowed_workflow_stages:
 - planning
 - implementation
@@ -13,13 +13,18 @@ default_memory_scopes:
 allowed_tool_groups:
 - context
 - artifacts
-- approvals
 - workspace
+- terminal
 sandbox_profile: isolated-worktree
 model_profile_hints:
+- fast
 - balanced
 approval_policy: request-before-risky-action
 human_interaction_policy: request-clarification-through-orchestrator
+specialization: ui-delivery
+primary_skills:
+- ui_states
+- accessibility_checks
 artifact_contracts:
 - artifact_type: frontend_notes
   visibility: upstream

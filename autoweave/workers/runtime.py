@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,6 +81,16 @@ class OpenHandsStreamEvent:
     requires_human: bool = False
     approval_required: bool = False
     empty_response: bool = False
+
+
+_HUMAN_INPUT_PREFIXES = (
+    "HUMAN_INPUT_REQUIRED:",
+    "CLARIFICATION_REQUEST:",
+)
+_APPROVAL_REQUIRED_PREFIXES = (
+    "APPROVAL_REQUIRED:",
+    "REVIEW_REQUIRED:",
+)
 
 
 def normalize_openhands_stream_event(event: Mapping[str, Any] | OpenHandsStreamEvent) -> OpenHandsStreamEvent:
@@ -202,10 +213,27 @@ def _normalize_openhands_api_event(payload: dict[str, Any], kind: str) -> OpenHa
         provider_specific_fields = llm_message.get("provider_specific_fields")
         reasoning_content = llm_message.get("reasoning_content")
         reasoning_content_present = isinstance(reasoning_content, str) and bool(reasoning_content.strip())
-        empty_response = role == "assistant" and not message.strip() and tool_call_count == 0
+        normalized_message, control_marker = _extract_control_marker(message)
+        requires_human = role == "assistant" and control_marker == "human_input_required"
+        approval_required = role == "assistant" and control_marker == "approval_required"
+        empty_response = (
+            role == "assistant"
+            and not normalized_message.strip()
+            and tool_call_count == 0
+            and not requires_human
+            and not approval_required
+        )
         return OpenHandsStreamEvent(
-            event_type="empty_response" if empty_response else "message",
-            message=message,
+            event_type=(
+                "clarification"
+                if requires_human
+                else "approval"
+                if approval_required
+                else "empty_response"
+                if empty_response
+                else "message"
+            ),
+            message=normalized_message,
             payload_json={
                 "kind": kind,
                 "role": role,
@@ -214,7 +242,11 @@ def _normalize_openhands_api_event(payload: dict[str, Any], kind: str) -> OpenHa
                 "content_part_types": content_part_types,
                 "provider_specific_fields_present": isinstance(provider_specific_fields, Mapping),
                 "reasoning_content_present": reasoning_content_present,
+                "control_marker": control_marker,
             },
+            terminal=requires_human or approval_required,
+            requires_human=requires_human,
+            approval_required=approval_required,
             empty_response=empty_response,
         )
     if "observationevent" in kind_lower or "actionevent" in kind_lower or "tokenevent" in kind_lower:
@@ -242,6 +274,20 @@ def _message_text(content: Any) -> str:
         if isinstance(text, str) and text.strip():
             parts.append(text)
     return "\n".join(part for part in parts if part)
+
+
+def _extract_control_marker(message: str) -> tuple[str, str | None]:
+    text = message.strip()
+    if not text:
+        return "", None
+    upper = text.upper()
+    for prefix in _HUMAN_INPUT_PREFIXES:
+        if upper.startswith(prefix):
+            return text[len(prefix):].strip(), "human_input_required"
+    for prefix in _APPROVAL_REQUIRED_PREFIXES:
+        if upper.startswith(prefix):
+            return text[len(prefix):].strip(), "approval_required"
+    return message, None
 
 
 def _content_part_types(content: Any) -> list[str]:
@@ -492,7 +538,7 @@ def resolve_openhands_reasoning_effort(
 def build_openhands_conversation_request(launch_payload: dict[str, Any]) -> dict[str, Any]:
     """Translate an AutoWeave launch payload into the official OpenHands conversation API."""
 
-    prompt = "\n".join(
+    prompt_lines = [
         line
         for line in (
             f"Task ID: {launch_payload.get('task_id', '')}",
@@ -503,7 +549,16 @@ def build_openhands_conversation_request(launch_payload: dict[str, Any]) -> dict
             f"Route reason: {launch_payload.get('route_reason', '')}",
         )
         if line and not line.endswith(": ")
-    )
+    ]
+    task_input_json = launch_payload.get("task_input_json")
+    if isinstance(task_input_json, Mapping) and task_input_json:
+        prompt_lines.extend(
+            (
+                "Task Input JSON:",
+                json.dumps(task_input_json, indent=2, sort_keys=True),
+            )
+        )
+    prompt = "\n".join(prompt_lines)
     runtime_policy = launch_payload.get("runtime_policy", {})
     workspace_path = str(launch_payload.get("workspace_path", "")).strip()
     return {

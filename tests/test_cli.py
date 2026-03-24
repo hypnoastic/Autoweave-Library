@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from apps.cli.bootstrap import AGENT_ROLES, bootstrap_repository
 from apps.cli.main import app
 from apps.cli.validation import validate_repository
+from autoweave.templates import sample_project
 
 
 runner = CliRunner()
@@ -32,6 +33,12 @@ def test_bootstrap_command_creates_sample_agents_and_configs(tmp_path: Path) -> 
     assert result.exit_code == 0
     for role in AGENT_ROLES:
         assert (tmp_path / "agents" / role / "autoweave.yaml").exists()
+        for skill_file in sample_project.AGENT_SKILL_FILES[role]:
+            skill_path = tmp_path / "agents" / role / skill_file
+            assert skill_path.exists()
+            if skill_path.name != "README.md":
+                skill_text = skill_path.read_text(encoding="utf-8")
+                assert "## Do" in skill_text or "## When to use" in skill_text
     assert (tmp_path / "configs" / "workflows" / "team.workflow.yaml").exists()
     assert "created:" in result.stdout
 
@@ -45,6 +52,33 @@ def test_validate_repository_passes_for_bootstrapped_layout(tmp_path: Path) -> N
     assert result.ok
     assert not result.missing
     assert not result.invalid
+
+
+def test_bootstrap_writes_role_specific_agent_metadata(tmp_path: Path) -> None:
+    _write_docs(tmp_path)
+    bootstrap_repository(tmp_path)
+
+    manager_autoweave = yaml.safe_load((tmp_path / "agents" / "manager" / "autoweave.yaml").read_text(encoding="utf-8"))
+    reviewer_autoweave = yaml.safe_load((tmp_path / "agents" / "reviewer" / "autoweave.yaml").read_text(encoding="utf-8"))
+    manager_playbook = yaml.safe_load((tmp_path / "agents" / "manager" / "playbook.yaml").read_text(encoding="utf-8"))
+
+    assert manager_autoweave["specialization"] == "workflow-decomposition"
+    assert manager_autoweave["primary_skills"] == ["workflow_decomposition", "stakeholder_alignment"]
+    assert reviewer_autoweave["specialization"] == "quality-and-release"
+    assert "DAG task list" in manager_playbook["goals"][0]
+
+
+def test_bootstrap_overwrite_refreshes_existing_sample_files(tmp_path: Path) -> None:
+    _write_docs(tmp_path)
+    bootstrap_repository(tmp_path)
+    stale_path = tmp_path / "agents" / "manager" / "soul.md"
+    stale_path.write_text("stale\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["bootstrap", "--root", str(tmp_path), "--overwrite"])
+
+    assert result.exit_code == 0
+    assert "updated:" in result.stdout
+    assert "turns a user brief into a dependency-aware DAG" in stale_path.read_text(encoding="utf-8")
 
 
 def test_validate_command_reports_invalid_workflow_entrypoint(tmp_path: Path) -> None:
@@ -102,3 +136,22 @@ def test_module_entrypoint_invokes_main(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert f"root={tmp_path}" in result.stdout
     assert "ok=True" in result.stdout
+
+
+def test_ui_command_prints_url_and_calls_dashboard_server(tmp_path: Path, monkeypatch) -> None:
+    _write_docs(tmp_path)
+    bootstrap_repository(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_serve_dashboard(*, root: Path, host: str, port: int, environ=None) -> None:
+        captured["root"] = root
+        captured["host"] = host
+        captured["port"] = port
+
+    monkeypatch.setattr("apps.cli.main.serve_dashboard", fake_serve_dashboard)
+
+    result = runner.invoke(app, ["ui", "--root", str(tmp_path), "--host", "127.0.0.1", "--port", "9876"])
+
+    assert result.exit_code == 0
+    assert "ui_url=http://127.0.0.1:9876" in result.stdout
+    assert captured == {"root": tmp_path, "host": "127.0.0.1", "port": 9876}

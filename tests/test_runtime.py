@@ -51,6 +51,7 @@ def _task(role: str = "backend") -> TaskRecord:
         title=f"{role} task",
         description=f"{role} implementation",
         assigned_role=role,
+        input_json={"user_request": "build a clothing storefront"},
     )
 
 
@@ -135,6 +136,7 @@ def test_compiler_builds_worker_config_with_vertex_env_and_no_login(tmp_path: Pa
     assert compiled["env"]["VERTEXAI_SERVICE_ACCOUNT_FILE"] == str(tmp_path / "vertex.json")
     assert compiled["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(tmp_path / "vertex.json")
     assert compiled["workspace_path"].endswith(str(tmp_path / "workspaces" / attempt.id))
+    assert compiled["task_input_json"] == {"user_request": "build a clothing storefront"}
 
 
 def test_vertex_env_mapping_requires_canonical_settings(tmp_path: Path) -> None:
@@ -237,6 +239,48 @@ def test_remote_worker_adapter_builds_launch_payload(tmp_path: Path) -> None:
 
     assert payload["interactive_login"] is False
     assert payload["workspace_path"].endswith(str(tmp_path / "workspaces" / attempt.id))
+    assert payload["task_input_json"] == {"user_request": "build a clothing storefront"}
+
+
+def test_openhands_request_includes_task_input_json_block() -> None:
+    request = build_openhands_conversation_request(
+        {
+            "provider_name": "VertexAI",
+            "model_name": "gemini-3-flash-preview",
+            "task_id": "task-1",
+            "task_attempt_id": "attempt-1",
+            "task_role": "manager",
+            "task_title": "Manager plan",
+            "task_description": "Plan the requested workflow.",
+            "task_input_json": {"user_request": "build a clothing ecommerce site"},
+            "route_reason": "role=manager",
+            "workspace_path": "/workspace/workspaces/attempt-1",
+            "runtime_policy": {"reasoning_effort": "none"},
+        }
+    )
+
+    text = request["initial_message"]["content"][0]["text"]
+    assert "Task Input JSON:" in text
+    assert '"user_request": "build a clothing ecommerce site"' in text
+
+
+def test_human_input_marker_is_normalized_to_requires_human() -> None:
+    event = normalize_openhands_stream_event(
+        {
+            "kind": "MessageEvent",
+            "source": "agent",
+            "llm_message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "HUMAN_INPUT_REQUIRED: What product categories should the first release support?"}],
+                "tool_calls": None,
+            },
+        }
+    )
+
+    assert event.event_type == "clarification"
+    assert event.requires_human is True
+    assert event.terminal is True
+    assert event.message == "What product categories should the first release support?"
 
 
 def test_openhands_stream_events_normalize_and_materialize_artifacts(tmp_path: Path) -> None:

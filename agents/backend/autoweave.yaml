@@ -1,6 +1,6 @@
 name: backend-agent
 role: backend
-description: AutoWeave sample backend agent
+description: AutoWeave sample backend agent focused on api and data contracts.
 allowed_workflow_stages:
 - planning
 - implementation
@@ -13,13 +13,17 @@ default_memory_scopes:
 allowed_tool_groups:
 - context
 - artifacts
-- approvals
 - workspace
+- terminal
 sandbox_profile: isolated-worktree
 model_profile_hints:
 - balanced
 approval_policy: request-before-risky-action
 human_interaction_policy: request-clarification-through-orchestrator
+specialization: api-and-data-contracts
+primary_skills:
+- api_contracts
+- data_integrity
 artifact_contracts:
 - artifact_type: backend_notes
   visibility: upstream

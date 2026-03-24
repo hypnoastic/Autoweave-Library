@@ -168,6 +168,14 @@ Current implementation only partially satisfies the prompt where live infrastruc
 - There is no single terminal-first runtime bootstrap that composes configs, env, repositories, artifact storage, observability, scheduler, and worker adapter into a locally runnable entrypoint.
 - The test suite is green, but it does not yet cover env-file resolution, credential-path relocation, live-config normalization, Docker-facing assumptions, or remote-service wiring contracts for Neon/Neo4j/OpenHands.
 
+## Gap analysis: 2026-03-24 monitoring-UI pass
+
+- The repository is still fundamentally terminal-first and library-first, but there is no dedicated monitoring surface for watching active workflow runs, task state, attempts, artifacts, or human blockers in one place.
+- The current CLI entrypoints are functional, but they do not provide a dedicated debug/monitoring view; the only way to inspect runs is through terminal summaries or by reading storage directly.
+- The storage layer can already read most canonical state for a workflow run, but it does not yet expose a concise read-only catalog of recent runs for a dashboard.
+- The repository root still mixes library code, sample project fixtures, and demo-validation assets closely enough that a clear monitoring surface is the most useful separation point for this pass.
+- This pass needs to add a lightweight local UI that can be launched from a command, accept a user request, and display canonical state without introducing a heavy frontend stack or changing the orchestrator boundary.
+
 ## Repair pass summary: 2026-03-20
 
 - Added `autoweave/settings.py` as the canonical local-development settings layer, with `.env` and `.env.local` precedence, canonical Vertex credential relocation, connection-target parsing, and redacted diagnostics.
@@ -381,6 +389,27 @@ The repo-root live example now completes through the real OpenHands path with:
 - `gemini-3-flash-preview` is the lower-risk direct smoke path; the planner default remains `gemini-3.1-pro-preview` because it produced the strongest successful live AutoWeave result in this pass.
 - Earlier sections in this file that mention IAM or `us-central1` Gemini 2.5 failures are historical notes; this section is the current source of truth for the Gemini migration outcome.
 
+## Gap analysis: 2026-03-24 packaged demo pass
+
+Already working:
+
+- the library packages cleanly, installs into a fresh environment, boots a new project layout, validates configs, and can dispatch the built-in workflow through the local Docker stack
+- local/dev Vertex routing now prefers Gemini 3 on `global`, and the repo-root live example has already succeeded through OpenHands
+
+Still missing for the user-requested packaged demo:
+
+- the installed CLI does not yet expose a generic "run this team request" command; `run-example` only dispatches the current workflow without an explicit user brief parameter
+- the worker prompt path does not currently include `task.input_json`, so a fresh project cannot pass a structured user request into the manager task without hardcoding it in the workflow YAML
+- human clarification currently depends on explicit OpenHands pause/confirmation events, which is too weak for a vague product brief demo where the manager should surface a concise clarification question back to the operator
+- the sample bootstrap still assumes the default bundled roles and workflow rather than a demo-specific team with manager, backend, frontend, and tester roles plus role-local skills/docs
+
+What this pass needs to deliver:
+
+- a minimal generic workflow-run command for packaged installs that accepts a user request and advances the current workflow across multiple ready tasks
+- prompt/input propagation so the manager task receives the user brief through canonical task state rather than ad hoc shell substitution
+- a narrow human-input convention that lets the worker surface a typed clarification request instead of silently looping or succeeding with a vague plan
+- a real fresh-install demo project with manager, backend, frontend, and tester agents, custom workflow/config files, the main repo env copied into the demo root, and a live run against the local Docker stack
+
 ## Final durable-runtime repair status: 2026-03-20
 
 - `autoweave/storage/` now resolves to the real Postgres-backed canonical repository path for workflow runs, tasks, attempts, approvals, events, artifact metadata, and memory/decision records, with Redis-backed lease and idempotency coordination.
@@ -450,3 +479,138 @@ This section supersedes the earlier repair-pass notes that still described Docke
 - The current validated local/dev default is Gemini 3 on the Vertex `global` endpoint, with Gemini 2.5 retained as explicit fallback profiles.
 - Repo-root direct smoke, OpenHands runtime validation, and `run-example --dispatch` now succeed through the live local Docker stack.
 - Remaining risk is external capacity variability on preview Gemini 3 models rather than a known AutoWeave provider-routing bug.
+
+## Packaged demo validation: 2026-03-24
+
+What was already implemented before this pass:
+
+- the packaged/fresh-install path already worked for `bootstrap`, `validate`, `doctor`, and the bundled `run-example` flow
+- the runtime already supported real OpenHands conversations, durable Postgres state, replay artifacts, and Gemini 3 routing on Vertex `global`
+- the fresh-project bootstrap still only exposed the fixed sample workflow path, and the worker prompt path did not yet carry canonical `task.input_json`
+
+What changed in this pass:
+
+- added a generic installed-CLI workflow execution path through `autoweave run-workflow --request ...`
+- propagated canonical `task.input_json` into the compiled OpenHands launch payload and final worker prompt
+- added a narrow control-marker convention so worker output beginning with `HUMAN_INPUT_REQUIRED:` or `CLARIFICATION_REQUEST:` becomes an authoritative AutoWeave human-request transition instead of plain assistant text
+- added packaged-demo regression coverage for task-input propagation, clarification handling, and multi-step workflow progression
+- built a clean packaged demo under `/tmp/autoweave-clothing-demo-venv` and `/tmp/autoweave-clothing-demo-project`, copied the main `.env.local`, and defined manager, backend, frontend, and tester roles plus a clothing-store workflow with role-local skill docs
+
+Observed live packaged-demo behavior:
+
+- packaged install succeeded from the built wheelhouse
+- fresh-project bootstrap and validation succeeded after fixing one YAML quoting issue in the custom workflow
+- packaged `doctor` succeeded using the copied env and normalized Vertex credentials
+- the installed CLI successfully ran `run-workflow` against the live Docker/OpenHands/Vertex stack
+- the manager task completed, wrote a final replay artifact, and unlocked the downstream DAG
+- a three-step run dispatched `manager_plan`, `frontend_ui`, and `backend_contract` in the fresh installed project
+- downstream tasks failed cleanly with durable `orphaned` attempt state plus explicit `conversation poll timed out after 15.0s` diagnostics when the shorter live poll timeout expired
+- no human request was opened in the live run, which means the real Gemini path still tends to make assumptions instead of obeying the clarification contract for vague briefs
+
+Root limitation after this pass:
+
+- the clarification path is implemented and covered in automated tests, but live model behavior is still prompt-sensitive; the manager does not reliably ask back for missing ecommerce details unless the model chooses to follow that control-marker instruction
+- this is now a model/prompt-quality limitation rather than a packaging, routing, or runtime-bootstrap failure
+
+## Template separation: 2026-03-24
+
+- sample-project generation has been moved behind a packaged template module at [`autoweave/templates/sample_project.py`](/Users/yashkumar/Autoweave/autoweave/templates/sample_project.py)
+- [`apps/cli/bootstrap.py`](/Users/yashkumar/Autoweave/apps/cli/bootstrap.py) now delegates sample-project rendering to the packaged template module instead of owning the sample content inline
+- the repo still keeps the existing root project files for compatibility, but the canonical source for bootstrap/new-project payloads is now the installed library package
+- targeted CLI and packaging tests passed after the refactor
+- a separate storage-context failure remains in the broader full-suite run, but it is unrelated to the template separation changes made in this pass
+
+## Gap analysis: 2026-03-24 library-separation and monitoring UI pass
+
+What is already in place:
+
+- the library/runtime code is already mostly separated under `autoweave/` and `apps/cli/`
+- durable workflow/task/attempt/artifact state exists behind the local runtime and canonical Postgres path
+- the packaged install path works, and the installed CLI can bootstrap a project and run workflows
+
+What is still mixed or weak:
+
+- the repository still behaves like both the library source tree and a project instance because bootstrap/validation/default config paths assume `agents/` and `configs/` directly under the active root
+- bundled sample project assets are not clearly packaged as templates distinct from the library implementation
+- there is no lightweight monitoring UI for seeing the current DAG, task ownership, attempt/workspace details, artifacts, blockers, and final outputs without parsing CLI summaries
+- the current `status` command does not expose enough canonical workflow state for live debugging
+
+What this pass needs to deliver:
+
+- keep `autoweave/` as the library and move bundled sample project assets behind an explicit project-template boundary so the library repo is not the same thing as a demo project
+- add a simple local monitoring UI that can be launched from a command, submit a user request to the main workflow, and display canonical workflow runs, tasks, attempts, artifacts, and human/approval blockers
+- preserve the architecture: AutoWeave remains the orchestrator, OpenHands remains the worker runtime, Postgres remains canonical truth, and the UI is only a local operator/debugging surface
+
+Design-doc drift note for this pass:
+
+- the implementation spec explicitly deferred a graphical product UI; this pass will add only a lightweight local monitoring/debugging surface launched by CLI command, not a full product UI or a new orchestration layer
+
+## Monitoring UI pass summary: 2026-03-24
+
+What changed:
+
+- the sample project scaffold content now lives in the installed library package under `autoweave.templates.sample_project` rather than being owned inline by the CLI implementation
+- bootstrap/validation still support the existing root sample layout for compatibility, but the canonical scaffold source for packaged installs is now the template module inside the library
+- added a lightweight local monitoring surface under `autoweave.monitoring` that can:
+  - launch a workflow from a user request
+  - show the current workflow blueprint
+  - show recent workflow runs from canonical storage
+  - show task states, attempt states, workspaces, artifacts, human blockers, approval blockers, and recent events
+  - surface the latest manager replay summary when available
+- added the `autoweave ui` CLI command to start that dashboard
+
+Validation completed in this pass:
+
+- targeted tests for the monitoring service, WSGI dashboard app, CLI command, and packaged install path passed
+- full `pytest -q` passed again after fixing an in-memory repository regression introduced by the new run-inspection list methods
+- a live CLI launch of `python3 -m apps.cli.main ui --root . --port 8877` succeeded and printed the dashboard URL
+
+Remaining limitation for this pass:
+
+- this sandbox blocks loopback HTTP probes from a second process with `Operation not permitted`, so I could not complete a live `curl http://127.0.0.1:8877/...` check after the server bound
+- the dashboard behavior itself is covered by direct WSGI tests and the CLI command launch path; the remaining limitation is sandbox networking, not the dashboard implementation
+
+## Gap analysis: 2026-03-24 demo-agent upgrade and promptable monitor pass
+
+What is already in place:
+
+- packaged sample-project generation is already centralized in `autoweave/templates/sample_project.py`
+- the local monitoring UI can already launch a workflow request and inspect canonical runs, tasks, attempts, artifacts, and blockers
+- the installed CLI path is already capable of bootstrapping a fresh project and launching the monitor
+
+What is still weak:
+
+- the default packaged agents are still too generic for a realistic engineering-team demo; their souls, playbooks, and skill directories read like placeholders rather than role-specific operating guidance
+- the default scaffold still uses a `reviewer` role, while the current demo intent is closer to `manager`, `backend`, `frontend`, and `tester`
+- the monitoring UI is functional but still thin; it needs better visibility into agent-role assignments, the workflow task list, manager output, and produced artifacts so a human can follow what is happening without reading raw JSON or logs
+
+What this pass needs to deliver:
+
+- upgrade the packaged sample agents so the default bootstrap creates a more realistic delivery team with richer role guidance and real skill documents under each agent
+- improve the lightweight monitor so it is practical for prompting the manager-facing workflow and tracking run/task/attempt/artifact progress live
+- keep the architecture unchanged: the UI remains a local operator/debugging surface over canonical AutoWeave state, and the workflow DAG still remains orchestrator-owned
+
+Design-doc drift note for this pass:
+
+- the implementation spec still defers a full product GUI, so this pass will stay within a small CLI-launched local monitor rather than introducing a separate product frontend or a second orchestration layer
+
+## Demo-agent and promptable monitor pass summary: 2026-03-24
+
+What changed:
+
+- the packaged sample agents now have stronger role-specific souls, playbooks, metadata, and real skill markdown files instead of placeholder-only `skills/README.md`
+- the repo-root sample project was refreshed from the packaged templates, so the current `agents/` and `configs/` used by the local runtime now match the richer scaffold
+- the monitor now exposes the project agent catalog in addition to the workflow blueprint, launch jobs, run steps, task assignments, attempts, artifacts, blockers, and manager summaries
+- the monitor prompt copy was corrected so it no longer claims the manager mutates the canonical DAG at runtime; it now accurately describes the manager as seeding the configured workflow entrypoint while AutoWeave advances the canonical DAG
+- `bootstrap --overwrite` now exists so the repo-root sample project or a local project can be resynced from the packaged templates without manual file-by-file edits
+
+Validation completed in this pass:
+
+- targeted scaffold, monitoring, packaging, and CLI tests passed
+- full `pytest -q` passed again
+- `python3 -m compileall autoweave apps tests` passed
+- the local UI command started successfully and is currently serving at `http://127.0.0.1:8765`
+
+Remaining limitation for this pass:
+
+- the monitor is useful for prompting and observing runs, but it still does not offer an in-UI answer/resume control for human blockers; open human requests are visible and authoritative state remains orchestrator-owned

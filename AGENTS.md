@@ -21,3 +21,5 @@ Do not declare the pass complete until both validations succeed:
 - packaged fresh-install validation in a clean environment
 
 Update `context.md` and `task_list.md` after each milestone with status, decisions, gaps, and drift from the design docs or build prompt.
+
+For the current library-separation and monitoring-UI pass, keep bundled sample project assets distinct from the library implementation by treating them as packaged templates or example projects, not as implicit library state. Any UI added in this pass must remain a lightweight local operator/debugging surface over canonical AutoWeave state; it must not bypass the orchestrator or become a separate workflow authority.

@@ -12,6 +12,9 @@
 - M10 is now implemented for the Vertex/OpenHands stabilization pass: the worker path no longer loops on repeated empty model responses.
 - M11 is now implemented for the Gemini 3 migration pass: local/dev routing now prefers Gemini 3 on the Vertex `global` endpoint while preserving explicit Gemini 2.5 fallback profiles.
 - The current live limitation is external Vertex preview-model capacity variability rather than provider routing, IAM, or empty-response loop behavior.
+- M12 is implemented for packaged fresh-install workflow demo validation with a custom team brief, clarification handling, and live monitoring through the installed CLI.
+- M13 is now implemented for separate bundled project templates plus a lightweight monitoring UI for local workflow inspection and launch, without changing the orchestrator boundary or adding a heavy frontend stack.
+- M14 is now implemented for upgrading the packaged demo-agent scaffold and making the monitor practical for live prompting and workflow observation.
 
 ## Milestones
 
@@ -120,12 +123,47 @@
   - direct LiteLLM smoke, OpenHands runtime validation, and repo-root `run-example --dispatch` succeeded with Gemini 3
   - failures continue to surface as clear terminal diagnostics instead of empty-response loops
 
+### M12. Packaged custom-team demo validation
+
+- Add the smallest correct installed-CLI path for running a workflow from a user brief instead of the fixed sample description.
+- Propagate canonical task input into the OpenHands prompt so the manager can see the user request without bypassing AutoWeave state.
+- Add a narrow clarification convention that maps an explicit worker request into authoritative `needs_input` / `waiting_for_human` state rather than relying only on OpenHands pause events.
+- Validate in a clean installed environment by creating a new project with manager, backend, frontend, and tester agents plus a demo workflow for a clothing ecommerce site.
+- Verification result:
+  - the packaged CLI can initialize a fresh project, validate it, and run the custom workflow from an explicit user request
+  - a deliberately incomplete brief either advances through the workflow or stops with a clear human clarification request instead of silently drifting
+  - the installed-project demo uses the main repo env/credentials and the existing local Docker stack
+
+### M13. Monitoring UI and run inspection
+
+- Treat bundled sample project assets as packaged templates rather than repo-root library state.
+- Add a lightweight local UI/server that can launch a workflow from a request and render live canonical state for workflow runs, tasks, attempts, artifacts, and human blockers.
+- Keep the implementation read-only with respect to orchestration state, using the existing AutoWeave runtime and storage repositories as the source of truth.
+- Prefer a minimal HTML/WSGI or stdlib-based surface instead of a heavy frontend framework.
+- Verification result:
+  - packaged bootstrap/new-project flows work from template assets without requiring the library repo root to double as a project instance
+  - the UI command can be launched from the library install
+  - a request can be submitted through the UI and the resulting run inspected live
+  - the dashboard shows current runs, task states, attempts, artifact outputs, and human-input/approval blockers without mutating canonical state directly
+  - direct loopback probing of the bound HTTP port remains sandbox-limited in this environment, so endpoint behavior is proven here through WSGI tests plus CLI launch rather than cross-process `curl`
+
+### M14. Demo-agent quality and promptable monitor usability
+
+- Upgrade the packaged sample-project assets so bootstrap/new-project flows create a more realistic delivery team with richer role guidance and real skill documents.
+- Align the default demo roles and workflow presentation with the current testing intent by covering manager, backend, frontend, and testing responsibilities.
+- Improve the local monitor so a human can prompt the workflow and clearly inspect the current task list, role assignments, attempts, workspaces, artifacts, blockers, and latest manager output without reading raw logs.
+- Verification result:
+  - bootstrapped projects contain richer agent souls, playbooks, metadata, and skill documents
+  - the monitor exposes the workflow blueprint, recent jobs, recent runs, and manager/task/attempt/artifact summaries clearly enough for interactive debugging
+  - targeted CLI/monitor/template tests pass, full `pytest -q` passes, and the UI command can be started locally for manual use
+
 ## Workstreams and ownership
 
 ### Lead agent
 
 - Owns shared contracts, planning files, package skeleton, integration, final verification, and drift tracking.
 - Owns durable-pass gap analysis, milestone integration, native runtime validation, packaged-install validation, and documentation closeout.
+- Owns integration of the monitoring command surface if it needs to be wired into a top-level CLI later.
 
 ### Orchestration workstream
 
@@ -149,8 +187,13 @@
 
 ### CLI and developer-experience workstream
 
-- Owns `apps/cli/`, sample configs under `agents/` and `configs/`, and environment/bootstrap docs.
-- Responsible for terminal entrypoints, sample workflow assets, `.env.example`, runtime docs, and packaged fresh-install validation assets.
+- Owns `apps/cli/`, packaged project-template assets, and environment/bootstrap docs.
+- Responsible for terminal entrypoints, template-based fresh-project scaffolding, `.env.example`, runtime docs, and packaged fresh-install validation assets.
+
+### Monitoring UI workstream
+
+- Owns `autoweave/monitoring/`.
+- Responsible for the local run-inspection UI, workflow launch form, canonical read-only run summaries, promptable monitoring command surface, and workflow/agent visibility improvements.
 
 ## Interface boundaries
 
@@ -246,6 +289,25 @@
 - routing tests that verify the active default model can move to Gemini 3 without breaking Vertex normalization
 - worker-path tests that verify OpenHands requests carry the selected Gemini 3 model string correctly
 - live comparison steps for direct provider smoke tests, OpenHands runs, and repo-root example flow with Gemini 2.5 fallback preserved
+
+### M12
+
+- tests for task-input propagation into the worker prompt
+- tests for explicit clarification marker handling and non-looping `needs_input` state transitions
+- CLI/runtime tests for generic workflow-run behavior over multiple ready tasks
+- packaged fresh-install validation with a custom project layout and live user brief
+- completed outcome:
+  - installed CLI can now run `autoweave run-workflow --request ...` in a fresh project
+  - canonical task input is passed into the worker prompt and clarification markers map to authoritative AutoWeave human-loop state
+  - fresh-project manager/backend/frontend/tester agent definitions and custom workflow were exercised against the live Docker stack
+  - live packaged demo advanced the DAG durably, but vague briefs still did not consistently trigger a human clarification request from the real model
+
+### M13
+
+- tests for template-based bootstrap and validation rather than repo-root sample-only behavior
+- tests for the monitoring UI launch flow and read-only run-inspection pages
+- tests for current-run summaries, task/attempt/artifact rendering, and blocker visibility
+- tests that the monitoring UI can accept a user request and start a workflow through the installed command surface
 
 ## Credential-dependent gates
 

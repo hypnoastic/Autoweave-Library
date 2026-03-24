@@ -277,6 +277,22 @@ class PostgresWorkflowRepository:
         edges = [TaskEdgeRecord.model_validate_json(row["data_json"]) for row in edge_rows]
         return WorkflowGraph(workflow_run=workflow_run, tasks=tasks, edges=edges)
 
+    def list_workflow_runs(self) -> list[WorkflowRunRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                sql.SQL("SELECT data_json FROM {}").format(self._qualified("workflow_runs"))
+            ).fetchall()
+        runs = [WorkflowRunRecord.model_validate_json(row["data_json"]) for row in rows]
+        runs.sort(
+            key=lambda item: (
+                item.started_at.isoformat() if item.started_at is not None else "",
+                item.ended_at.isoformat() if item.ended_at is not None else "",
+                item.id,
+            ),
+            reverse=True,
+        )
+        return runs
+
     def save_workflow_definition(self, workflow_definition: WorkflowDefinitionRecord) -> WorkflowDefinitionRecord:
         record = workflow_definition.model_copy(deep=True)
         with self._connect() as conn:
@@ -413,6 +429,16 @@ class PostgresWorkflowRepository:
                 )
             return TaskRecord.model_validate_json(row["data_json"])
 
+    def list_tasks_for_run(self, workflow_run_id: str) -> list[TaskRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                sql.SQL("SELECT data_json FROM {} WHERE workflow_run_id = %s ORDER BY task_key").format(
+                    self._qualified("tasks")
+                ),
+                (workflow_run_id,),
+            ).fetchall()
+        return [TaskRecord.model_validate_json(row["data_json"]) for row in rows]
+
     def save_attempt(self, attempt: TaskAttemptRecord) -> TaskAttemptRecord:
         record = attempt.model_copy(deep=True)
         last_error: psycopg.OperationalError | None = None
@@ -456,6 +482,16 @@ class PostgresWorkflowRepository:
                     self._qualified("attempts")
                 ),
                 (task_id,),
+            ).fetchall()
+        return [TaskAttemptRecord.model_validate_json(row["data_json"]) for row in rows]
+
+    def list_attempts_for_run(self, workflow_run_id: str) -> list[TaskAttemptRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                sql.SQL("SELECT data_json FROM {} WHERE workflow_run_id = %s ORDER BY attempt_number, id").format(
+                    self._qualified("attempts")
+                ),
+                (workflow_run_id,),
             ).fetchall()
         return [TaskAttemptRecord.model_validate_json(row["data_json"]) for row in rows]
 
