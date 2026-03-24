@@ -227,6 +227,37 @@ Current implementation only partially satisfies the prompt where live infrastruc
 - Remaining caveat:
   - the remote state refresh can still take noticeable time depending on external service latency, but the UI no longer hangs on that path; it serves a quick placeholder snapshot and then swaps in cached live data
 
+## Gap analysis: 2026-03-24 operator-console UX cleanup pass
+
+- The current UI is functional but still structured like a single-screen debug surface rather than a usable operator console.
+- Major modes are mixed together:
+  - chat
+  - workflow run browsing
+  - task inspection
+  - artifacts/events
+  - agent catalog
+  are all effectively presented as one page with stacked panels.
+- There is no real application shell or navigation model, so a new user cannot immediately tell where to chat versus where to inspect system state.
+- Chat is still not a full primary interaction surface:
+  - the composer lives in a sidebar-style panel
+  - the thread shares space and emphasis with monitoring
+  - system and manager content still feel closer to a debug transcript than a manager-facing conversation
+- Workflow runs are grouped better than before, but the view is still too dense and too close to raw monitoring output. Runs need a dedicated inspection mode with cleaner summaries and progressive disclosure.
+- Tasks, artifacts, events, and agents do not have clearly separated sections, so the operator has to mentally parse one mixed page instead of navigating deliberate views.
+- The layout hierarchy is weak:
+  - no app shell
+  - no explicit active section
+  - no stable primary/secondary pane pattern
+  - no clear contextual inspector area
+- This pass should keep the lightweight WSGI/HTML approach and preserve the orchestrator boundary, but the UI itself needs to become a real multi-view operator console with:
+  - app shell and navigation
+  - dedicated chat mode
+  - dedicated workflow runs view
+  - dedicated tasks/DAG view
+  - dedicated agents view
+  - dedicated artifacts/events monitoring views
+  - clear config/blueprint/system view
+
 ## Gap analysis: 2026-03-20 durable infrastructure pass
 
 Already implemented:
@@ -760,3 +791,34 @@ Current remaining limitation for this version:
 
 - the library/runtime/orchestrator path is now internally consistent and test-covered, but fully successful multi-step live completion still depends on external OpenHands plus Vertex response latency; in this environment that sometimes produces `conversation poll timed out` or a generic worker error on downstream branches
 - the operator console now makes those failures visible and resumable, but it cannot eliminate upstream model/runtime variability by itself
+
+## Operator-console cleanup update: 2026-03-25
+
+What was broken when this cleanup slice started:
+
+- clearing local runtime state left the UI looking broken because the monitor used a hard-coded 4-second timeout and downgraded into a warning banner before the real Postgres-backed snapshot finished loading
+- the app shell was cleaner than the earlier mixed dashboard, but the selected-run task view still sprawled horizontally and felt like a state dump rather than an operator inspection tool
+- the sidebar held all navigation, but long menus did not have their own stable scroll behavior
+- the project root and long task/workspace strings could still push the layout into awkward wrapping at laptop widths
+
+What changed in this slice:
+
+- cleared stale local state under `var/`, `workspace/`, and `workspaces/` so the next UI run started from a clean local filesystem state
+- fixed `repository_root()` resolution so monitor/bootstrap flows consistently use the absolute project root instead of a relative `.` path
+- removed the operator-only 4-second live snapshot timeout; the monitor now returns immediately with a loading state and refreshes canonical data in the background until the real snapshot is ready
+- kept the clean-local-sqlite fast path, but narrowed it so test/runtime factories can opt in explicitly instead of being skipped accidentally
+- tightened the sidebar layout with its own vertical scroll container and stable scrollbar behavior
+- simplified the Tasks / DAG section from a wide multi-column state grid into a vertical stack of collapsible state groups so task data stays inside the page and reads cleanly
+- added regression coverage for the new background-refresh behavior and the explicit clean-sqlite shortcut contract
+
+What I validated:
+
+- `.venv/bin/python -m pytest tests/test_monitoring.py tests/test_cli.py -q`
+- `.venv/bin/python -m pytest -q`
+- live UI startup through `python3 -m apps.cli.main ui --root . --host 127.0.0.1 --port 8765`
+- live browser inspection through Playwright after the page finished loading
+
+Current known limitation after this cleanup:
+
+- the first live monitor refresh is still gated by the real Postgres-backed canonical snapshot path, which currently takes roughly 5 to 6 seconds in this environment before cached run data is available
+- the UI no longer lies about that path by showing a fake timeout failure, but it still waits on the backend snapshot before the first fully populated view appears

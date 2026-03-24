@@ -27,7 +27,7 @@ class BootstrapResult:
 
 
 def repository_root(root: Path | None = None) -> Path:
-    return Path.cwd() if root is None else root
+    return (Path.cwd() if root is None else root).resolve()
 
 
 def expected_repository_files(root: Path) -> tuple[Path, ...]:

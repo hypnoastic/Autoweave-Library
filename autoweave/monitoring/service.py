@@ -96,9 +96,12 @@ class MonitoringService:
         environ: Mapping[str, str] | None = None,
         runtime_factory: Callable[..., Any] = build_local_runtime,
     ) -> None:
-        self.root = root
+        self.root = root.resolve()
         self.environ = dict(environ or {})
         self._runtime_factory = runtime_factory
+        self._can_short_circuit_clean_sqlite = runtime_factory is build_local_runtime or bool(
+            getattr(runtime_factory, "autoweave_skip_clean_sqlite", False)
+        )
         self._jobs: dict[str, MonitoringJob] = {}
         self._lock = Lock()
         self._snapshot_cache: dict[str, Any] | None = None
@@ -171,6 +174,10 @@ class MonitoringService:
                     "primary_skills": list(metadata.get("primary_skills", [])),
                     "model_profile_hints": list(metadata.get("model_profile_hints", [])),
                     "allowed_tool_groups": list(metadata.get("allowed_tool_groups", [])),
+                    "allowed_workflow_stages": list(metadata.get("allowed_workflow_stages", [])),
+                    "approval_policy": metadata.get("approval_policy", ""),
+                    "human_interaction_policy": metadata.get("human_interaction_policy", ""),
+                    "route_priority": metadata.get("route_priority", ""),
                     "playbook_goals": list(playbook.get("goals", [])),
                     "skill_files": skill_files,
                     "soul_excerpt": soul_text.splitlines()[2] if len(soul_text.splitlines()) >= 3 else soul_text.strip(),
@@ -230,6 +237,13 @@ class MonitoringService:
     def _compute_snapshot(self, *, limit: int = 5) -> dict[str, Any]:
         base_payload = self._snapshot_base_payload()
         base_errors: list[str] = []
+        settings = LocalEnvironmentSettings.load(root=self.root, environ=self.environ)
+        runtime_payload: dict[str, Any] = {
+            "project_root": str(settings.project_root),
+            "runs": [],
+            "selected_run_id": None,
+            "selected_run": None,
+        }
         try:
             base_payload["agents"] = self.agent_catalog()
         except Exception as exc:
@@ -238,6 +252,19 @@ class MonitoringService:
             base_payload["workflow_blueprint"] = self.workflow_blueprint()
         except Exception as exc:
             base_errors.append(f"workflow blueprint unavailable: {exc}")
+        if (
+            self._can_short_circuit_clean_sqlite
+            and self.root == settings.project_root
+            and
+            settings.autoweave_canonical_backend == "sqlite"
+            and not (settings.state_dir() / "autoweave.sqlite3").exists()
+        ):
+            return {
+                **base_payload,
+                **runtime_payload,
+                "status": "degraded" if base_errors else "ok",
+                "load_error": "\n".join(base_errors) or None,
+            }
         try:
             with self._runtime() as runtime:
                 repository = runtime.storage.workflow_repository
@@ -256,22 +283,28 @@ class MonitoringService:
                     for workflow_run in runs
                 ]
                 selected_run = run_payloads[0] if run_payloads else None
-                return {
-                    **base_payload,
-                    "status": "degraded" if base_errors else "ok",
-                    "load_error": "\n".join(base_errors) or None,
-                    "project_root": str(runtime.settings.project_root),
-                    "runs": run_payloads,
-                    "selected_run_id": selected_run["id"] if selected_run is not None else None,
-                    "selected_run": selected_run,
-                }
+                runtime_payload.update(
+                    {
+                        "project_root": str(runtime.settings.project_root),
+                        "runs": run_payloads,
+                        "selected_run_id": selected_run["id"] if selected_run is not None else None,
+                        "selected_run": selected_run,
+                    }
+                )
         except Exception as exc:
             combined_errors = [*base_errors, "".join(traceback.format_exception_only(type(exc), exc)).strip()]
             return {
                 **base_payload,
+                **runtime_payload,
                 "status": "degraded",
                 "load_error": "\n".join(item for item in combined_errors if item),
             }
+        return {
+            **base_payload,
+            **runtime_payload,
+            "status": "degraded" if base_errors else "ok",
+            "load_error": "\n".join(base_errors) or None,
+        }
 
     def jobs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -652,7 +685,7 @@ class MonitoringService:
                     "status": "warning",
                 }
             )
-        if manager_summary and manager_summary != manager_plan:
+        if manager_summary and manager_summary != manager_plan and manager_summary != manager_outcome:
             messages.append({"id": f"{workflow_run.id}:summary", "role": "manager", "kind": "summary", "text": manager_summary})
         for request in human_requests:
             messages.append(
@@ -686,11 +719,13 @@ class MonitoringService:
                 }
             )
         for step in run_steps:
+            if step["state"] in {"waiting_for_dependency", "ready"}:
+                continue
             messages.append(
                 {
                     "id": f"{workflow_run.id}:step:{step['index']}",
                     "role": "system",
-                    "kind": "step",
+                    "kind": "state_update",
                     "text": f"{step['task_key']} -> {step['state']}",
                     "status": step["state"],
                     "task_key": step["task_key"],

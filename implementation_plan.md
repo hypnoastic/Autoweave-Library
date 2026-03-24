@@ -17,6 +17,8 @@
 - M14 is now implemented for upgrading the packaged demo-agent scaffold and making the monitor practical for live prompting and workflow observation.
 - M15 is now implemented for operator-console hardening, resumable human/approval flow, runtime policy enforcement, and live dispatch coordination; the remaining drift is external OpenHands/Vertex latency during some real downstream runs.
 - M16 is now implemented for screenshot-driven operator-console repair: derive operator-facing run health from canonical state, separate manager failure from manager plan rendering, redesign the details layout for laptop-width readability, and make `/api/state` non-blocking through cached asynchronous refresh.
+- M17 is now active for operator-console UX cleanup: add a proper app shell and navigation, separate chat from monitoring, and reorganize workflow/task/artifact/event inspection into dedicated views.
+- M18 is now active for operator-console loading and layout cleanup: remove the misleading 4-second monitor timeout, tighten sidebar scrolling, and simplify dense task-state rendering into a cleaner vertical inspection flow.
 
 ## Milestones
 
@@ -185,6 +187,37 @@
   - task states such as `waiting_for_dependency` remain readable without clipping
   - monitor regression tests cover derived status and the updated rendering contract
   - `/api/state` returns immediately with a cached/loading snapshot while live refresh continues in the background
+
+### M17. Operator-console navigation and view architecture cleanup
+
+- Build a proper app shell with a clear navigation model instead of one mixed monitoring page.
+- Split the UI into distinct views:
+  - Chat
+  - Workflow Runs
+  - Tasks / DAG
+  - Agents
+  - Artifacts
+  - Observability / Events
+  - Blueprint / Config
+- Rebuild chat as the primary human-facing mode with a dedicated thread area, dedicated composer, clearer role styling, and contextual manager/approval behavior.
+- Keep monitoring as separate inspection views with cleaner progressive disclosure and less noisy formatting.
+- Verification result:
+  - a new user can immediately locate where to chat and where to inspect run state
+  - workflow runs are expandable/collapsible in a dedicated view rather than dumped beside chat
+  - tasks, artifacts, agents, and events each render in clear dedicated sections
+  - UI regression tests cover the new shell/navigation labels and updated empty/loading/error states
+
+### M18. Operator-console loading and layout cleanup
+
+- Remove the hard-coded 4-second UI snapshot timeout so the operator console no longer degrades into a false warning banner while canonical state is still loading.
+- Keep first paint immediate by returning a loading shell while the snapshot refresh continues in the background.
+- Give the sidebar its own scroll behavior so section navigation remains usable on smaller laptop-height screens.
+- Simplify the Tasks / DAG view into vertical collapsible state groups rather than a wide multi-column layout that pushes content across the page.
+- Verification result:
+  - first-load UI state remains responsive while live snapshot refresh is in flight
+  - the sidebar scrolls independently and cleanly
+  - task-state inspection no longer overflows into a wide cross-page grid
+  - monitoring regressions cover background refresh semantics and the clean-sqlite shortcut contract
 
 ## Workstreams and ownership
 

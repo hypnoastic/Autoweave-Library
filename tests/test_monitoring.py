@@ -350,7 +350,10 @@ def test_monitoring_dashboard_wsgi_app_serves_state_and_launch(tmp_path: Path) -
 
     assert index.status_code == 200
     assert "AutoWeave Operator Console" in index.text
-    assert "Manager Chat" in index.text
+    assert "Workflow Runs" in index.text
+    assert "Tasks / DAG" in index.text
+    assert "Observability / Events" in index.text
+    assert "Settings / Config" in index.text
     assert state.status_code == 200
     assert state.json()["status"] == "ok"
     assert state.json()["selected_run_id"] == "run_demo_1"
@@ -373,6 +376,58 @@ def test_monitoring_service_snapshot_degrades_but_preserves_catalog(tmp_path: Pa
 
     assert payload["status"] == "degraded"
     assert "backend unavailable" in str(payload["load_error"])
+    assert payload["agents"][0]["role"] == "backend"
+    assert payload["workflow_blueprint"]["entrypoint"] == "manager_plan"
+    assert payload["runs"] == []
+
+
+def test_monitoring_service_snapshot_returns_loading_until_background_refresh_finishes(tmp_path: Path) -> None:
+    bootstrap_repository(tmp_path)
+
+    class _SlowRuntime:
+        def __enter__(self):
+            time.sleep(0.5)
+            self._runtime = _FakeRuntime(tmp_path)
+            return self._runtime
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    service = MonitoringService(root=tmp_path, runtime_factory=lambda **kwargs: _SlowRuntime())
+
+    started_at = time.monotonic()
+    payload = service.snapshot(limit=3)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.45
+    assert payload["status"] == "loading"
+    assert payload["refreshing"] is True
+    assert payload["agents"] == []
+    assert payload["runs"] == []
+
+    for _ in range(50):
+        payload = service.snapshot(limit=3)
+        if payload["status"] == "ok":
+            break
+        time.sleep(0.02)
+
+    assert payload["status"] == "ok"
+    assert payload["runs"][0]["id"] == "run_demo_1"
+
+
+def test_monitoring_service_snapshot_skips_runtime_for_clean_sqlite_state(tmp_path: Path) -> None:
+    bootstrap_repository(tmp_path)
+
+    def unexpected_runtime_factory(**kwargs):
+        raise AssertionError("runtime should not be constructed for a clean local sqlite state")
+    unexpected_runtime_factory.autoweave_skip_clean_sqlite = True
+
+    service = MonitoringService(root=tmp_path, runtime_factory=unexpected_runtime_factory)
+
+    payload = service.snapshot(limit=3)
+
+    assert payload["status"] == "ok"
+    assert payload["load_error"] is None
     assert payload["agents"][0]["role"] == "backend"
     assert payload["workflow_blueprint"]["entrypoint"] == "manager_plan"
     assert payload["runs"] == []
