@@ -388,6 +388,14 @@
   - real boutique storefront frontend output
   - canonical artifact publication for manager/frontend/backend contract tasks
 
+### M15
+
+- monitoring projection fix that separates canonical workflow status from live execution status
+- operator-facing task execution projection for approval-gated, human-gated, dependency-waiting, and truly active worker states
+- UI updates so run summaries show `no active worker` when execution is paused instead of implying a task is still running
+- run ordering fix so the most relevant active run is surfaced before older blocked history once snapshot data is available
+- regression coverage for execution-status payloads and blocked/paused run presentation
+
 ## Credential-dependent gates
 
 - Use the existing local env and secret material already present in the workspace rather than inventing new credentials.

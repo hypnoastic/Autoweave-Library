@@ -309,11 +309,17 @@ def test_monitoring_service_snapshot_exposes_canonical_state(tmp_path: Path) -> 
     assert payload["runs"][0]["workflow_request"] == "Build a boutique storefront"
     assert payload["runs"][0]["operator_status"] == "waiting_for_human"
     assert payload["runs"][0]["operator_summary"] == "waiting on 1 human answer(s)"
+    assert payload["runs"][0]["execution_status"] == "waiting_for_human"
+    assert payload["runs"][0]["execution_summary"] == "no active worker; waiting on 1 human answer(s)"
+    assert payload["runs"][0]["active_attempt_count"] == 0
     assert '"backend_contract"' in (payload["runs"][0]["manager_plan"] or "")
     assert "Backend first, then frontend" in (payload["runs"][0]["manager_summary"] or "")
     assert '"backend_contract"' in (payload["runs"][0]["manager_outcome"] or "")
     assert payload["runs"][0]["tasks"][0]["task_key"] == "manager_plan"
     assert payload["runs"][0]["tasks"][0]["latest_attempt_state"] == "queued"
+    assert payload["runs"][0]["tasks"][0]["attempt_display_state"] == "awaiting_human"
+    assert payload["runs"][0]["tasks"][0]["has_active_worker"] is False
+    assert payload["runs"][0]["tasks"][0]["worker_status"] == "waiting_for_human"
     assert payload["runs"][0]["tasks"][0]["input_json"]["user_request"] == "Build a boutique storefront"
     assert payload["runs"][0]["run_steps"][0]["task_key"] == "manager_plan"
     assert payload["runs"][0]["human_requests"][0]["question"] == "Which payment providers should be enabled?"
@@ -354,11 +360,13 @@ def test_monitoring_dashboard_wsgi_app_serves_state_and_launch(tmp_path: Path) -
     assert "Tasks / DAG" in index.text
     assert "Observability / Events" in index.text
     assert "Settings / Config" in index.text
+    assert "Active workers" in index.text
     assert state.status_code == 200
     assert state.json()["status"] == "ok"
     assert state.json()["selected_run_id"] == "run_demo_1"
     assert state.json()["runs"][0]["id"] == "run_demo_1"
     assert state.json()["runs"][0]["operator_status"] == "waiting_for_human"
+    assert state.json()["runs"][0]["execution_status"] == "waiting_for_human"
     assert state.json()["agents"][0]["role"] == "backend"
     assert launch.status_code == 202
     assert launch.json()["status"] in {"queued", "running", "completed"}
@@ -584,5 +592,7 @@ def test_monitoring_service_marks_blocked_runs_and_separates_manager_failure(tmp
     run = payload["runs"][0]
     assert run["operator_status"] == "blocked"
     assert "blocked by manager_plan" == run["operator_summary"]
+    assert run["execution_status"] == "blocked"
+    assert run["execution_summary"] == "no active worker; blocked by manager_plan"
     assert run["manager_plan"] is None
     assert run["manager_outcome"] == "conversation poll timed out after 90.0s"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import traceback
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Callable, Iterable, Mapping
@@ -14,6 +15,8 @@ from autoweave.compiler.loader import CanonicalConfigLoader
 from autoweave.local_runtime import LocalWorkflowRunReport, build_local_runtime
 from autoweave.models import ArtifactRecord, ApprovalRequestRecord, EventRecord, HumanRequestRecord, TaskAttemptRecord, TaskRecord, WorkflowRunRecord, generate_id
 from autoweave.settings import LocalEnvironmentSettings
+
+_ACTIVE_WORKER_ATTEMPT_STATES = {"dispatching", "running", "paused", "needs_input"}
 
 
 def _iso(value: object) -> str | None:
@@ -282,6 +285,7 @@ class MonitoringService:
                     )
                     for workflow_run in runs
                 ]
+                run_payloads.sort(key=self._run_sort_key)
                 selected_run = run_payloads[0] if run_payloads else None
                 runtime_payload.update(
                     {
@@ -481,6 +485,10 @@ class MonitoringService:
         for task in tasks:
             latest_attempt = latest_attempt_by_task_id.get(task.id)
             template = task_templates_by_key.get(task.task_key)
+            worker_status, worker_summary, attempt_display_state, has_active_worker = self._task_execution_projection(
+                task=task,
+                latest_attempt=latest_attempt,
+            )
             task_payloads.append(
                 {
                     "id": task.id,
@@ -499,6 +507,7 @@ class MonitoringService:
                     "route_hints": list(getattr(template, "route_hints", [])) if template is not None else [],
                     "latest_attempt_id": latest_attempt.id if latest_attempt else None,
                     "latest_attempt_state": latest_attempt.state.value if latest_attempt else None,
+                    "attempt_display_state": attempt_display_state,
                     "workspace_id": latest_attempt.workspace_id if latest_attempt else None,
                     "workspace_path": (
                         latest_attempt.compiled_worker_config_json.get("workspace_path")
@@ -510,6 +519,9 @@ class MonitoringService:
                         if latest_attempt is not None
                         else None
                     ),
+                    "worker_status": worker_status,
+                    "worker_summary": worker_summary,
+                    "has_active_worker": has_active_worker,
                     "artifact_types": [
                         artifact.artifact_type for artifact in grouped_artifacts.get(task.id, [])
                     ],
@@ -613,6 +625,13 @@ class MonitoringService:
             approval_requests=approval_payloads,
             attempts_payload=attempts_payload,
         )
+        execution_status, execution_summary, active_attempt_task_keys = self._derive_execution_status(
+            workflow_status=workflow_run.status.value,
+            task_payloads=task_payloads,
+            human_requests=human_payloads,
+            approval_requests=approval_payloads,
+            attempts_payload=attempts_payload,
+        )
         run_title = str(workflow_run.root_input_json.get("user_request", "")).strip() or workflow_run.id
 
         return {
@@ -621,6 +640,8 @@ class MonitoringService:
             "status": workflow_run.status.value,
             "operator_status": operator_status,
             "operator_summary": operator_summary,
+            "execution_status": execution_status,
+            "execution_summary": execution_summary,
             "graph_revision": workflow_run.graph_revision,
             "started_at": _iso(workflow_run.started_at),
             "ended_at": _iso(workflow_run.ended_at),
@@ -629,6 +650,8 @@ class MonitoringService:
             "ready_task_keys": ready_task_keys,
             "blocked_task_keys": blocked_task_keys,
             "failed_task_keys": failed_task_keys,
+            "active_attempt_task_keys": active_attempt_task_keys,
+            "active_attempt_count": len(active_attempt_task_keys),
             "task_state_counts": task_state_counts,
             "attempt_state_counts": attempt_state_counts,
             "manager_plan": manager_plan,
@@ -885,6 +908,124 @@ class MonitoringService:
         if waiting_dependency:
             return "waiting_for_dependency", f"{len(waiting_dependency)} task(s) waiting on dependencies"
         return "stalled", "no active attempts and no runnable tasks"
+
+    def _derive_execution_status(
+        self,
+        *,
+        workflow_status: str,
+        task_payloads: list[dict[str, Any]],
+        human_requests: list[dict[str, Any]],
+        approval_requests: list[dict[str, Any]],
+        attempts_payload: list[dict[str, Any]],
+    ) -> tuple[str, str, tuple[str, ...]]:
+        open_human = [item for item in human_requests if item["status"] == "open"]
+        open_approval = [item for item in approval_requests if item["status"] == "requested"]
+        active_attempts = [
+            attempt
+            for attempt in attempts_payload
+            if attempt["state"] in _ACTIVE_WORKER_ATTEMPT_STATES
+        ]
+        active_task_keys = tuple(
+            attempt["task_key"]
+            for attempt in active_attempts
+            if isinstance(attempt.get("task_key"), str) and attempt["task_key"]
+        )
+        ready_tasks = [task for task in task_payloads if task["state"] == "ready"]
+        blocked_tasks = [task for task in task_payloads if task["state"] == "blocked"]
+        failed_tasks = [task for task in task_payloads if task["state"] == "failed"]
+        waiting_dependency = [task for task in task_payloads if task["state"] == "waiting_for_dependency"]
+
+        if workflow_status == "completed":
+            return "completed", "no active worker; workflow execution is complete", ()
+        if workflow_status == "failed":
+            return "failed", "no active worker; workflow ended in a failed state", ()
+        if active_task_keys:
+            joined = ", ".join(active_task_keys[:3])
+            suffix = "..." if len(active_task_keys) > 3 else ""
+            return "active", f"{len(active_task_keys)} active worker(s): {joined}{suffix}", active_task_keys
+        if open_human:
+            return "waiting_for_human", f"no active worker; waiting on {len(open_human)} human answer(s)", ()
+        if open_approval:
+            return "waiting_for_approval", f"no active worker; waiting on {len(open_approval)} approval request(s)", ()
+        if ready_tasks:
+            joined = ", ".join(task["task_key"] for task in ready_tasks[:3])
+            suffix = "..." if len(ready_tasks) > 3 else ""
+            return "ready", f"no active worker; ready to dispatch: {joined}{suffix}", ()
+        if blocked_tasks:
+            joined = ", ".join(task["task_key"] for task in blocked_tasks[:3])
+            suffix = "..." if len(blocked_tasks) > 3 else ""
+            return "blocked", f"no active worker; blocked by {joined}{suffix}", ()
+        if failed_tasks:
+            return "failed", f"no active worker; {len(failed_tasks)} task(s) failed", ()
+        if waiting_dependency:
+            return "waiting_for_dependency", f"no active worker; {len(waiting_dependency)} task(s) waiting on dependencies", ()
+        return "idle", "no active worker", ()
+
+    def _task_execution_projection(
+        self,
+        *,
+        task: TaskRecord,
+        latest_attempt: TaskAttemptRecord | None,
+    ) -> tuple[str, str, str | None, bool]:
+        task_state = task.state.value
+        if latest_attempt is None:
+            if task_state == "ready":
+                return "ready", "Ready to dispatch. No worker is running yet.", None, False
+            if task_state == "waiting_for_dependency":
+                return "waiting_for_dependency", "No worker is running. Waiting on upstream dependencies.", None, False
+            if task_state == "waiting_for_human":
+                return "waiting_for_human", "No worker is running. Waiting on a human answer.", None, False
+            if task_state == "waiting_for_approval":
+                return "waiting_for_approval", "No worker is running. Waiting on approval before dispatch.", None, False
+            if task_state == "completed":
+                return "completed", "Execution finished successfully.", None, False
+            if task_state == "failed":
+                return "failed", "Execution finished with a failure.", None, False
+            if task_state == "blocked":
+                return "blocked", f"Execution is blocked: {task.block_reason or 'blocked'}", None, False
+            return task_state, "No worker is running.", None, False
+
+        attempt_state = latest_attempt.state.value
+        has_active_worker = attempt_state in _ACTIVE_WORKER_ATTEMPT_STATES
+        if has_active_worker:
+            return "active", f"Worker is active in attempt {latest_attempt.attempt_number}.", attempt_state, True
+        if task_state == "waiting_for_approval":
+            return "waiting_for_approval", "No worker is running. Dispatch is paused until approval is granted.", "approval_gate", False
+        if task_state == "waiting_for_human":
+            return "waiting_for_human", "No worker is running. The task is waiting on human input.", "awaiting_human", False
+        if task_state == "waiting_for_dependency":
+            return "waiting_for_dependency", "No worker is running. The task is waiting on dependencies.", "dependency_wait", False
+        if task_state == "ready":
+            return "ready", "No worker is running. The task is ready to dispatch.", "ready_to_dispatch", False
+        if task_state == "completed":
+            return "completed", "Execution finished successfully.", "completed", False
+        if task_state == "failed":
+            return "failed", "Execution finished with a failure.", attempt_state, False
+        if task_state == "blocked":
+            return "blocked", f"Execution is blocked: {task.block_reason or attempt_state}", attempt_state, False
+        return task_state, f"No worker is running. Latest attempt is {attempt_state}.", attempt_state, False
+
+    def _run_sort_key(self, payload: Mapping[str, Any]) -> tuple[int, str]:
+        execution_status = str(payload.get("execution_status", "") or "")
+        operator_status = str(payload.get("operator_status", "") or "")
+        priority_map = {
+            "active": 0,
+            "ready": 1,
+            "waiting_for_human": 2,
+            "waiting_for_approval": 3,
+            "blocked": 4,
+            "waiting_for_dependency": 5,
+            "idle": 6,
+            "completed": 7,
+            "failed": 8,
+        }
+        priority = priority_map.get(execution_status, priority_map.get(operator_status, 9))
+        started_at = str(payload.get("started_at") or "")
+        try:
+            started_timestamp = datetime.fromisoformat(started_at).timestamp() if started_at else 0.0
+        except ValueError:
+            started_timestamp = 0.0
+        return (priority, f"{-started_timestamp:020.3f}")
 
 
 def _read_text(path: Path) -> str:

@@ -678,8 +678,8 @@ def _render_index() -> str:
     function statusClass(status) {
       const normalized = String(status || "").toLowerCase();
       if (["ok", "completed", "approved", "resolved", "succeeded"].includes(normalized)) return "ok";
-      if (["running", "queued", "ready", "loading", "refreshing"].includes(normalized)) return "live";
-      if (["waiting_for_dependency", "waiting_for_human", "waiting_for_approval", "blocked", "requested", "orphaned"].includes(normalized)) return "warn";
+      if (["running", "queued", "ready", "loading", "refreshing", "active"].includes(normalized)) return "live";
+      if (["waiting_for_dependency", "waiting_for_human", "waiting_for_approval", "blocked", "requested", "orphaned", "approval_gate", "awaiting_human", "dependency_wait", "idle"].includes(normalized)) return "warn";
       if (["failed", "error", "rejected"].includes(normalized)) return "bad";
       return "";
     }
@@ -774,12 +774,14 @@ def _render_index() -> str:
       nodes.headerPills.innerHTML = [
         pill(payload.status || "loading", payload.status || "loading"),
         run ? pill(run.operator_status || run.status, run.operator_status || run.status) : pill("no run selected", "warn"),
+        run ? pill(run.execution_status || "idle", run.execution_status || "idle") : "",
         run ? pill(`${(run.tasks || []).length} tasks`, "ok") : "",
         run ? pill(`${(run.artifacts || []).length} artifacts`, "ok") : "",
       ].filter(Boolean).join("");
       nodes.sidebarRunStatus.innerHTML = run
         ? [
             pill(run.operator_status || run.status, run.operator_status || run.status),
+            pill(run.execution_status || "idle", run.execution_status || "idle"),
             pill(truncate(run.title || run.workflow_request || run.id, 28), "live"),
           ].join("")
         : pill("no run selected", "warn");
@@ -809,22 +811,34 @@ def _render_index() -> str:
       if (!run) {
         return infoEmpty("No run selected. Start in Chat or pick a run in Workflow Runs.");
       }
+      const openApprovals = (run.approval_requests || []).filter((item) => item.status === "requested").length;
+      const openHumans = (run.human_requests || []).filter((item) => item.status === "open").length;
+      const executionBannerClass = statusClass(run.execution_status || "idle") === "bad"
+        ? "error"
+        : statusClass(run.execution_status || "idle") === "live"
+          ? "info"
+          : "warn";
       return `
         <div class="surface run-summary">
           <div>
             <div class="pill-row">
               ${pill(run.operator_status || run.status, run.operator_status || run.status)}
+              ${pill(run.execution_status || "idle", run.execution_status || "idle")}
               ${pill(`graph r${run.graph_revision}`, "ok")}
               ${pill(`${(run.attempts || []).length} attempts`, "ok")}
             </div>
             <h3 style="margin-top:10px;">${escapeHtml(run.title || run.workflow_request || run.id)}</h3>
             <p class="muted" style="margin-top:8px;">${escapeHtml(run.workflow_request || "No request recorded on this run.")}</p>
           </div>
+          ${run.execution_summary ? `<div class="banner active ${executionBannerClass}">${escapeHtml(run.execution_summary)}</div>` : ""}
           <div class="summary-grid">
-            <div class="fact"><span class="muted">Workflow status</span><strong>${escapeHtml(humanize(run.operator_status || run.status))}</strong></div>
+            <div class="fact"><span class="muted">Canonical workflow</span><strong>${escapeHtml(humanize(run.status))}</strong></div>
+            <div class="fact"><span class="muted">Execution</span><strong>${escapeHtml(humanize(run.execution_status || "idle"))}</strong></div>
+            <div class="fact"><span class="muted">Active workers</span><strong>${escapeHtml(run.active_attempt_count || 0)}</strong></div>
+            <div class="fact"><span class="muted">Open approvals</span><strong>${escapeHtml(openApprovals)}</strong></div>
+            <div class="fact"><span class="muted">Open human requests</span><strong>${escapeHtml(openHumans)}</strong></div>
             <div class="fact"><span class="muted">Started</span><strong>${escapeHtml(formatTime(run.started_at))}</strong></div>
             <div class="fact"><span class="muted">Artifacts</span><strong>${escapeHtml((run.artifacts || []).length)}</strong></div>
-            <div class="fact"><span class="muted">Open human requests</span><strong>${escapeHtml((run.human_requests || []).filter((item) => item.status === "open").length)}</strong></div>
           </div>
           ${run.manager_summary ? `<pre>${escapeHtml(run.manager_summary)}</pre>` : ""}
         </div>
@@ -840,7 +854,7 @@ def _render_index() -> str:
       const composerHint = openHuman
         ? "Your reply will answer the selected run's open human request."
         : approvals.length
-          ? "Handle approvals in the thread below, or start a new run with a fresh prompt."
+          ? "Execution is paused. No worker is running until you resolve the approval below."
           : "Send a new request to the manager. The orchestrator remains the source of truth for the runnable DAG.";
 
       nodes.sectionChat.innerHTML = `
@@ -973,14 +987,14 @@ def _render_index() -> str:
         return;
       }
       const groups = {
-        active: runs.filter((run) => !["completed", "failed", "blocked", "waiting_for_human", "waiting_for_approval"].includes(run.operator_status)),
-        attention: runs.filter((run) => ["blocked", "waiting_for_human", "waiting_for_approval"].includes(run.operator_status)),
-        complete: runs.filter((run) => run.operator_status === "completed"),
-        failed: runs.filter((run) => run.operator_status === "failed"),
+        active: runs.filter((run) => ["active", "ready"].includes(run.execution_status)),
+        attention: runs.filter((run) => ["blocked", "waiting_for_human", "waiting_for_approval", "idle"].includes(run.execution_status) || ["blocked", "waiting_for_human", "waiting_for_approval"].includes(run.operator_status)),
+        complete: runs.filter((run) => run.execution_status === "completed" || run.operator_status === "completed"),
+        failed: runs.filter((run) => run.execution_status === "failed" || run.operator_status === "failed"),
       };
       const groupMeta = [
-        ["active", "Active", "Runs still moving through the DAG or waiting to dispatch."],
-        ["attention", "Needs attention", "Runs waiting on you or blocked on a clear issue."],
+        ["active", "Active", "Runs with a live worker or immediate dispatchable work."],
+        ["attention", "Needs attention", "Runs paused on approvals, human input, or a hard block."],
         ["complete", "Completed", "Runs that finished successfully."],
         ["failed", "Failed", "Runs that ended in a failed terminal state."],
       ];
@@ -1010,10 +1024,11 @@ def _render_index() -> str:
                         </div>
                         <div class="pill-row">
                           ${pill(run.operator_status || run.status, run.operator_status || run.status)}
+                          ${pill(run.execution_status || "idle", run.execution_status || "idle")}
                           ${pill(`${(run.tasks || []).length} tasks`, "ok")}
                         </div>
                       </div>
-                      <p class="muted">${escapeHtml(truncate(run.operator_summary || run.workflow_request || "No summary available.", 160))}</p>
+                      <p class="muted">${escapeHtml(truncate(run.execution_summary || run.operator_summary || run.workflow_request || "No summary available.", 160))}</p>
                       <div class="actions">
                         <button type="button" class="btn subtle" data-run-select="${escapeHtml(run.id)}">Select</button>
                         <button type="button" class="btn secondary" data-open-section="chat" data-run-id="${escapeHtml(run.id)}">Open chat</button>
@@ -1045,9 +1060,10 @@ def _render_index() -> str:
         return;
       }
       const groups = [
-        ["Running / queued", run.tasks.filter((task) => ["running", "queued"].includes(task.state))],
-        ["Ready", run.tasks.filter((task) => task.state === "ready")],
-        ["Waiting", run.tasks.filter((task) => ["waiting_for_dependency", "waiting_for_human", "waiting_for_approval"].includes(task.state))],
+        ["Active workers", run.tasks.filter((task) => task.has_active_worker)],
+        ["Ready to dispatch", run.tasks.filter((task) => task.state === "ready")],
+        ["Waiting on people or policy", run.tasks.filter((task) => ["waiting_for_human", "waiting_for_approval"].includes(task.state))],
+        ["Waiting on dependencies", run.tasks.filter((task) => task.state === "waiting_for_dependency")],
         ["Blocked", run.tasks.filter((task) => task.state === "blocked")],
         ["Completed", run.tasks.filter((task) => task.state === "completed")],
         ["Failed", run.tasks.filter((task) => task.state === "failed")],
@@ -1079,11 +1095,12 @@ def _render_index() -> str:
                         </div>
                         <div class="pill-row">
                           ${pill(task.state, task.state)}
-                          ${task.latest_attempt_state ? pill(task.latest_attempt_state, task.latest_attempt_state) : ""}
+                          ${task.attempt_display_state ? pill(task.attempt_display_state, task.attempt_display_state) : task.latest_attempt_state ? pill(task.latest_attempt_state, task.latest_attempt_state) : ""}
                         </div>
                       </div>
                       ${task.description ? `<p>${escapeHtml(task.description)}</p>` : ""}
                       ${task.block_reason ? `<div class="banner active warn">${escapeHtml(task.block_reason)}</div>` : ""}
+                      ${task.worker_summary ? `<div class="banner active ${statusClass(task.worker_status || task.state) === "live" ? "info" : statusClass(task.worker_status || task.state) === "bad" ? "error" : "warn"}">${escapeHtml(task.worker_summary)}</div>` : ""}
                       <div class="chip-row">
                         ${(task.hard_dependencies || []).length ? task.hard_dependencies.map((dep) => `<span class="pill">${escapeHtml(dep)}</span>`).join("") : `<span class="pill">no hard deps</span>`}
                       </div>

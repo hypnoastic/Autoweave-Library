@@ -886,3 +886,50 @@ Current remaining limitation after this slice:
 
 - the broader multi-step live run is still slower than ideal because later backend/integration/review branches depend on real OpenHands plus Vertex latency
 - the canonical downstream context bug is fixed, but a full end-to-end six-step workflow can still spend minutes waiting on external worker completion
+
+## Operator execution-state clarity update: 2026-03-25
+
+What was misleading in the UI when this slice started:
+
+- the monitor exposed canonical workflow state and task state, but it did not clearly separate those from actual live worker execution state
+- a run with an approved review step that later timed out could still look like it was somehow "still running" because the console emphasized canonical `running` or raw queued attempts over the real execution blocker
+- queued attempts behind approval or human-input gates were visually too close to active execution
+- older blocked runs were noisy in the run list and could compete visually with the currently active run
+
+What changed in this slice:
+
+- the monitoring payload now exposes a separate `execution_status`, `execution_summary`, `active_attempt_count`, and `active_attempt_task_keys`
+- task payloads now expose operator-facing worker projections:
+  - `worker_status`
+  - `worker_summary`
+  - `attempt_display_state`
+  - `has_active_worker`
+- the UI now shows both:
+  - canonical workflow status
+  - live execution status
+- run summaries now explicitly state when there is **no active worker** and the system is waiting on approval, human input, dependencies, or a block
+- the Tasks / DAG view now groups work by execution meaning:
+  - active workers
+  - ready to dispatch
+  - waiting on people or policy
+  - waiting on dependencies
+  - blocked
+  - completed
+  - failed
+- queued attempts behind approval or human gates now render with clearer operator labels such as `approval_gate` or `awaiting_human` instead of looking like active execution
+- workflow runs are now sorted by live relevance so the current active run is intended to appear before older blocked history once the snapshot is populated
+
+Validation completed in this slice:
+
+- `.venv/bin/python -m pytest tests/test_monitoring.py -q`
+- `.venv/bin/python -m pytest -q`
+- restarted the local UI server on `http://127.0.0.1:8765`
+- confirmed by direct canonical inspection that:
+  - `team_1.0_run_demo_710d6fc4a47f48b2a483e6acadb9325b` is genuinely active with one running manager attempt
+  - `team_1.0_run_demo_396003f8f20a4e5a9e219e74ab3cf56a` is not re-running; it is blocked on `review` after an approved request and two historical review attempts
+  - `team_1.0_run_demo_555afef4397a47e08ca0c12f7b53742d` is an older blocked history run, not the current live execution
+
+Current limitation after this slice:
+
+- on a cold monitor start, the initial snapshot can still sit in `loading` for a noticeable amount of time while the real Postgres-backed state is assembled
+- this slice fixes clarity once data is available, but it does not yet make the initial remote-backed snapshot instant
