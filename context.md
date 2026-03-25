@@ -1017,3 +1017,38 @@ Additional cleanup bug fixed during verification:
 - that side effect was causing the operator UI or any read-only bootstrap path to recreate a baseline run after cleanup
 - the runtime now keeps the default graph ephemeral until an execution path explicitly seeds it
 - after stopping the stale pre-fix UI server and rerunning cleanup, a direct Postgres repository query confirmed `canonical_run_count 0`
+
+## Library-shape cleanup pass: 2026-03-25
+
+What was still off before this pass:
+
+- the repo still committed root `agents/` and `configs/` folders even though those are project template assets, not true library source
+- repo-root validation and runtime behavior still implicitly assumed those materialized files existed
+- that made the library checkout look like an active sample project instead of a clean package with bootstrap-generated project assets
+
+What changed in this pass:
+
+- packaged template content under `autoweave.templates.sample_project` is now the fallback source of truth for agent/config files
+- config loading falls back to packaged defaults if `agents/...` or `configs/...` files are not materialized in the current root
+- validation now treats missing template-backed project files as warnings instead of hard failures
+- repo-root `bootstrap` remains the explicit way to materialize editable `agents/` and `configs/` files locally
+- root `agents/` and `configs/` tracked sample-project files were removed from the library repo and are now ignored if regenerated locally
+
+Validation completed for this pass:
+
+- targeted CLI/runtime tests covering packaged-template fallback passed
+- full `pytest -q` passed
+- `compileall` passed
+
+Current repo shape after cleanup:
+
+- library/code:
+  - `autoweave/`
+  - `apps/`
+  - `tests/`
+  - `docs/`
+- local-only ignored state:
+  - `.env.local`
+  - `.venv/`
+  - `config/`
+- sample project assets are now generated on demand instead of tracked at repo root

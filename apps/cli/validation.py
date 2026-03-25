@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from autoweave.templates import sample_project
 from apps.cli.bootstrap import AGENT_ROLES, RUNTIME_FILES, ROUTING_FILE, WORKFLOW_FILE, expected_repository_files
 
 
@@ -28,16 +29,28 @@ def validate_repository(root: Path) -> ValidationResult:
     checked: list[Path] = []
     missing: list[Path] = []
     invalid: list[str] = []
+    warnings: list[str] = []
+    template_backed = set(sample_project.render_project_files().keys())
 
     for path in expected_repository_files(root):
         checked.append(path)
         if not path.exists():
-            missing.append(path)
+            relative = path.relative_to(root)
+            if relative in template_backed:
+                warnings.append(f"using packaged template defaults for {relative}")
+            else:
+                missing.append(path)
 
     if not missing:
         invalid.extend(_validate_yaml_contracts(root))
 
-    return ValidationResult(root=root, missing=tuple(missing), invalid=tuple(invalid), checked=tuple(checked))
+    return ValidationResult(
+        root=root,
+        missing=tuple(missing),
+        invalid=tuple(invalid),
+        warnings=tuple(warnings),
+        checked=tuple(checked),
+    )
 
 
 def _validate_yaml_contracts(root: Path) -> list[str]:
@@ -113,8 +126,13 @@ def _require_yaml_keys(path: Path, root: Path, required_keys: set[str]) -> list[
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
+    if path.exists():
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    else:
+        rendered = sample_project.render_project_file(path)
+        if rendered is None:
+            raise FileNotFoundError(path)
+        loaded = yaml.safe_load(rendered) or {}
     if not isinstance(loaded, dict):
         raise TypeError(f"{path} must contain a YAML mapping")
     return loaded

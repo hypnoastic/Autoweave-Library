@@ -15,3 +15,5 @@ __pycache__/
 .mypy_cache/
 .coverage
 *.pyc
+/agents/
+/configs/

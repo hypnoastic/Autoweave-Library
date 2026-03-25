@@ -80,6 +80,19 @@ def test_validate_repository_passes_for_bootstrapped_layout(tmp_path: Path) -> N
     assert result.ok
     assert not result.missing
     assert not result.invalid
+    assert not result.warnings
+
+
+def test_validate_repository_uses_packaged_defaults_when_agents_and_configs_are_missing(tmp_path: Path) -> None:
+    _write_docs(tmp_path)
+
+    result = validate_repository(tmp_path)
+
+    assert result.ok
+    assert not result.missing
+    assert not result.invalid
+    assert any("using packaged template defaults for agents/manager/autoweave.yaml" == warning for warning in result.warnings)
+    assert any("using packaged template defaults for configs/workflows/team.workflow.yaml" == warning for warning in result.warnings)
 
 
 def test_bootstrap_writes_role_specific_agent_metadata(tmp_path: Path) -> None:
@@ -133,6 +146,16 @@ def test_validate_command_detects_missing_docs(tmp_path: Path) -> None:
     assert "missing=docs/autoweave_high_level_architecture.md" in result.stdout
     assert "missing=docs/autoweave_implementation_spec.md" in result.stdout
     assert "missing=docs/autoweave_diagrams_source.md" in result.stdout
+
+
+def test_validate_command_succeeds_with_packaged_defaults_when_project_files_are_not_materialized(tmp_path: Path) -> None:
+    _write_docs(tmp_path)
+
+    result = runner.invoke(app, ["validate", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "validation=ok" in result.stdout
+    assert "warning=using packaged template defaults for agents/manager/autoweave.yaml" in result.stdout
 
 
 def test_bootstrap_vertex_defaults_prefer_gemini_3_and_keep_legacy_profiles(tmp_path: Path) -> None:

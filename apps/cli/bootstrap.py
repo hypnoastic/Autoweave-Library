@@ -18,6 +18,7 @@ AGENT_FILES = sample_project.AGENT_FILES
 RUNTIME_FILES = sample_project.RUNTIME_FILES
 WORKFLOW_FILE = sample_project.WORKFLOW_FILE
 ROUTING_FILE = sample_project.ROUTING_FILE
+TEMPLATE_PROJECT_FILES = tuple(sample_project.render_project_files().keys())
 
 
 @dataclass(frozen=True)
@@ -31,12 +32,7 @@ def repository_root(root: Path | None = None) -> Path:
 
 
 def expected_repository_files(root: Path) -> tuple[Path, ...]:
-    paths: list[Path] = list(DOC_FILES) + [WORKFLOW_FILE, ROUTING_FILE, *RUNTIME_FILES]
-    for role in AGENT_ROLES:
-        role_dir = Path("agents") / role
-        paths.extend(role_dir / filename for filename in AGENT_FILES)
-        paths.extend(role_dir / skill_file for skill_file in sample_project.AGENT_SKILL_FILES.get(role, ()))
-    return tuple(root / relative for relative in paths)
+    return tuple(root / relative for relative in (*DOC_FILES, *TEMPLATE_PROJECT_FILES))
 
 
 def bootstrap_repository(root: Path, *, overwrite: bool = False) -> BootstrapResult:

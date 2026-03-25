@@ -294,6 +294,35 @@ def render_agent_skill_files(role: str) -> dict[Path, str]:
     return files
 
 
+def render_project_files() -> dict[Path, str]:
+    files: dict[Path, str] = {}
+    for role in AGENT_ROLES:
+        role_dir = Path("agents") / role
+        files[role_dir / "soul.md"] = render_agent_soul(role)
+        files[role_dir / "playbook.yaml"] = render_agent_playbook(role)
+        files[role_dir / "autoweave.yaml"] = render_agent_autoweave(role)
+        for relative_path, content in render_agent_skill_files(role).items():
+            files[role_dir / relative_path] = content
+    files[WORKFLOW_FILE] = render_workflow_yaml()
+    files[ROUTING_FILE] = render_model_profiles_yaml()
+    files.update(render_runtime_files())
+    return files
+
+
+def render_project_file(relative_path: str | Path) -> str | None:
+    normalized = Path(relative_path)
+    candidates = [normalized]
+    parts = normalized.parts
+    for marker in ("agents", "configs"):
+        if marker in parts:
+            candidates.append(Path(*parts[parts.index(marker) :]))
+    rendered_files = render_project_files()
+    for candidate in candidates:
+        if candidate in rendered_files:
+            return rendered_files[candidate]
+    return None
+
+
 def render_workflow_yaml() -> str:
     workflow: dict[str, Any] = {
         "name": "team",

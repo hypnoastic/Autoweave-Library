@@ -15,6 +15,7 @@ from autoweave.config_models import (
     VertexConfig,
     WorkflowDefinitionConfig,
 )
+from autoweave.templates import sample_project
 
 TConfig = TypeVar("TConfig")
 
@@ -23,7 +24,13 @@ def load_yaml_model(path: str | Path, model_cls: type[TConfig]) -> TConfig:
     """Load a YAML file and validate it against a pydantic model."""
 
     raw_path = Path(path)
-    payload = yaml.safe_load(raw_path.read_text()) or {}
+    if raw_path.exists():
+        payload = yaml.safe_load(raw_path.read_text()) or {}
+    else:
+        rendered = sample_project.render_project_file(raw_path)
+        if rendered is None:
+            raise FileNotFoundError(raw_path)
+        payload = yaml.safe_load(rendered) or {}
     if hasattr(model_cls, "model_validate"):
         return model_cls.model_validate(payload)  # type: ignore[no-any-return]
     return model_cls(**payload)  # type: ignore[call-arg, no-any-return]

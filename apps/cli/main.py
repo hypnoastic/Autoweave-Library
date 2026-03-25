@@ -22,6 +22,8 @@ def _echo_validation_result(root_path: Path, result: ValidationResult) -> None:
         typer.echo(f"missing={path.relative_to(root_path)}")
     for issue in result.invalid:
         typer.echo(f"invalid={issue}")
+    for warning in result.warnings:
+        typer.echo(f"warning={warning}")
 
 
 @app.command("status")
@@ -41,7 +43,7 @@ def validate(root: Path | None = typer.Option(None, "--root", help="Repository r
     root_path = repository_root(root)
     result = validate_repository(root_path)
     if result.ok:
-        typer.echo("validation=ok")
+        _echo_validation_result(root_path, result)
         raise typer.Exit(code=0)
 
     typer.echo("validation=failed")
@@ -49,6 +51,8 @@ def validate(root: Path | None = typer.Option(None, "--root", help="Repository r
         typer.echo(f"missing={path.relative_to(root_path)}")
     for issue in result.invalid:
         typer.echo(f"invalid={issue}")
+    for warning in result.warnings:
+        typer.echo(f"warning={warning}")
     raise typer.Exit(code=1)
 
 

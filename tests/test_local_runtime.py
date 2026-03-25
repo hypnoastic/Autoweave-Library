@@ -91,6 +91,12 @@ def _prepare_local_root(root: Path) -> None:
     bootstrap_repository(root)
 
 
+def _prepare_template_only_root(root: Path) -> None:
+    _write_docs(root)
+    _write_env_files(root)
+    _write_vertex_key(root)
+
+
 def _test_storage_wiring(settings: LocalEnvironmentSettings) -> LocalStorageWiring:
     artifact_root = settings.artifact_store_path()
     state_root = settings.project_root / "var" / "state"
@@ -819,6 +825,18 @@ def test_local_runtime_build_does_not_seed_canonical_run_without_execution(tmp_p
 
     with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([])) as runtime:
         assert runtime.orchestration.state.graph.workflow_run.id == "team_1.0_run"
+        assert runtime.storage.workflow_repository.list_workflow_runs() == []
+
+
+def test_local_runtime_can_boot_from_packaged_templates_without_materialized_project_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _prepare_template_only_root(tmp_path)
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([])) as runtime:
+        assert runtime.workflow_definition.entrypoint == "manager_plan"
+        assert runtime.agent_definition("manager").role == "manager"
         assert runtime.storage.workflow_repository.list_workflow_runs() == []
 
 

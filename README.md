@@ -2,7 +2,7 @@
 
 AutoWeave is a terminal-first orchestration library. It owns canonical workflow state, DAG scheduling, approvals, artifact routing, context retrieval, model routing, and observability. OpenHands is the worker runtime. PostgreSQL is canonical truth. Redis is ephemeral coordination. Neo4j is a projection/query layer. Vertex AI is the model platform.
 
-Bundled sample project scaffolding is now treated as library-packaged template content under `autoweave.templates`, rather than being owned inline by the CLI implementation. The repo still keeps root sample assets for compatibility, but fresh-project bootstrap flows should treat the installed library package as the canonical template source.
+Bundled sample project scaffolding lives in the package under `autoweave.templates`. Root `agents/` and `configs/` are no longer committed library state; `bootstrap` materializes editable copies only when you explicitly want them.
 
 ## Local architecture
 
@@ -46,11 +46,16 @@ docker compose ps
 
 ```bash
 python3 -m pip install -e .[dev]
-python3 -m apps.cli.main bootstrap --root .
 python3 -m apps.cli.main validate --root .
 python3 -m apps.cli.main doctor --root .
 python3 -m apps.cli.main run-example --root . --dispatch
 python3 -m apps.cli.main ui --root .
+```
+
+If you want editable sample-project files in the current directory, materialize them explicitly:
+
+```bash
+python3 -m apps.cli.main bootstrap --root .
 ```
 
 `run-example --dispatch` uses the built-in notifications-settings workflow example. It will exit non-zero if the worker run fails. In the current validation environment, the local OpenHands path reaches Vertex successfully; the remaining live limitation is runtime quality under external Vertex behavior such as rate limiting or long-running conversations.
@@ -76,7 +81,7 @@ The UI is intentionally lightweight and local. It is an operator/debugging surfa
 
 ## Agents, workflows, and autonomy
 
-AutoWeave uses three project-owned inputs:
+AutoWeave uses three project-owned inputs when they are materialized into a project:
 
 - `agents/<role>/autoweave.yaml`: canonical agent metadata such as tool groups, model hints, approval policy, and human interaction policy
 - `agents/<role>/soul.md` and `agents/<role>/playbook.yaml`: role guidance and execution goals

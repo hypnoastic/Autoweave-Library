@@ -416,6 +416,22 @@
   - live repo cleanup succeeded against the canonical backend
   - full live backend fixture validation remains partially gated by current sandbox DNS failures for the configured Neon and Neo4j Aura hosts
 
+### M17
+
+- remove tracked root sample-project `agents/` and `configs/` directories from the library repo
+- make config loading and validation fall back to packaged template content when those project files are not materialized
+- keep `bootstrap` as the explicit materialization step for editable project assets
+- add regression tests for validation/runtime behavior on a docs-only root with packaged defaults
+- completed implementation:
+  - packaged templates now back config loading and validation directly
+  - repo-root validation succeeds on a clean checkout with explicit warnings instead of requiring committed project fixtures
+  - tracked root `agents/` and `configs/` sample-project files were removed and are now ignored if regenerated locally
+- validation outcome:
+  - targeted CLI/runtime fallback tests passed
+  - full `pytest -q` passed
+  - repo-root `python3 -m apps.cli.main validate --root .` passed with packaged-template warnings
+  - `compileall` passed
+
 ## Credential-dependent gates
 
 - Use the existing local env and secret material already present in the workspace rather than inventing new credentials.
