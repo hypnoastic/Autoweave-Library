@@ -813,6 +813,15 @@ def test_local_runtime_reuses_existing_canonical_graph_on_restart(tmp_path: Path
     assert first_run_id == second_run_id == "team_1.0_run"
 
 
+def test_local_runtime_build_does_not_seed_canonical_run_without_execution(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([])) as runtime:
+        assert runtime.orchestration.state.graph.workflow_run.id == "team_1.0_run"
+        assert runtime.storage.workflow_repository.list_workflow_runs() == []
+
+
 def test_local_runtime_avoids_full_graph_resync_for_state_only_updates(tmp_path: Path, monkeypatch) -> None:
     _prepare_local_root(tmp_path)
     calls: list[dict[str, object]] = []

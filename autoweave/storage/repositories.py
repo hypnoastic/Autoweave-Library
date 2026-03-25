@@ -69,6 +69,37 @@ class InMemoryWorkflowRepository:
         except KeyError as exc:
             raise KeyError(f"workflow run {workflow_run_id!r} is not registered") from exc
 
+    def delete_workflow_run(self, workflow_run_id: str) -> bool:
+        graph = self._graphs.pop(workflow_run_id, None)
+        if graph is None:
+            return False
+        self._graphs_order = [run_id for run_id in self._graphs_order if run_id != workflow_run_id]
+        task_ids = [task.id for task in graph.tasks]
+        for task in graph.tasks:
+            self._task_key_index.pop((workflow_run_id, task.task_key), None)
+        for task_id in task_ids:
+            self._tasks.pop(task_id, None)
+            self._task_to_run.pop(task_id, None)
+            for artifact_id in self._artifacts_by_task.pop(task_id, []):
+                artifact = self._artifacts.pop(artifact_id, None)
+                if artifact is not None:
+                    self._artifacts_by_run[artifact.workflow_run_id] = [
+                        existing
+                        for existing in self._artifacts_by_run.get(artifact.workflow_run_id, [])
+                        if existing != artifact_id
+                    ]
+        for attempt_id in self._attempts_by_run.pop(workflow_run_id, []):
+            self._attempts.pop(attempt_id, None)
+        for request_id in self._human_requests_by_run.pop(workflow_run_id, []):
+            self._human_requests.pop(request_id, None)
+        for request_id in self._approval_requests_by_run.pop(workflow_run_id, []):
+            self._approval_requests.pop(request_id, None)
+        for artifact_id in self._artifacts_by_run.pop(workflow_run_id, []):
+            self._artifacts.pop(artifact_id, None)
+        for event_id in self._events_by_run.pop(workflow_run_id, []):
+            self._events.pop(event_id, None)
+        return True
+
     def list_tasks_for_run(self, workflow_run_id: str) -> list[TaskRecord]:
         return [task.model_copy(deep=True) for task in self.get_graph(workflow_run_id).tasks]
 

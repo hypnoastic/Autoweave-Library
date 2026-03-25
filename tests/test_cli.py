@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from apps.cli.bootstrap import AGENT_ROLES, bootstrap_repository
 from apps.cli.main import app
 from apps.cli.validation import validate_repository
+from autoweave.local_runtime import build_local_runtime
 from autoweave.templates import sample_project
 
 
@@ -23,8 +24,35 @@ def _write_docs(root: Path) -> None:
         "autoweave_high_level_architecture.md",
         "autoweave_implementation_spec.md",
         "autoweave_diagrams_source.md",
-    ):
+        ):
         (docs_dir / name).write_text(f"# {name}\n", encoding="utf-8")
+
+
+def _write_local_runtime_env(root: Path) -> None:
+    (root / "config" / "secrets").mkdir(parents=True, exist_ok=True)
+    (root / "config" / "secrets" / "vertex_service_account.json").write_text("{}", encoding="utf-8")
+    (root / ".env.local").write_text(
+        "\n".join(
+            [
+                "VERTEXAI_PROJECT=demo-project",
+                "VERTEXAI_LOCATION=global",
+                "VERTEXAI_SERVICE_ACCOUNT_FILE=./config/secrets/vertex_service_account.json",
+                "GOOGLE_APPLICATION_CREDENTIALS=./config/secrets/vertex_service_account.json",
+                "POSTGRES_URL=postgresql://demo:demo@127.0.0.1:5432/autoweave",
+                "REDIS_URL=redis://127.0.0.1:6379/0",
+                "NEO4J_URL=neo4j://127.0.0.1:7687",
+                "NEO4J_USERNAME=neo4j",
+                "NEO4J_PASSWORD=secret",
+                "ARTIFACT_STORE_URL=file://./var/artifacts",
+                "OPENHANDS_AGENT_SERVER_BASE_URL=http://127.0.0.1:8000",
+                "AUTOWEAVE_CANONICAL_BACKEND=sqlite",
+                "AUTOWEAVE_GRAPH_BACKEND=sqlite",
+                "AUTOWEAVE_STATE_DIR=var/state",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_bootstrap_command_creates_sample_agents_and_configs(tmp_path: Path) -> None:
@@ -155,3 +183,57 @@ def test_ui_command_prints_url_and_calls_dashboard_server(tmp_path: Path, monkey
     assert result.exit_code == 0
     assert "ui_url=http://127.0.0.1:9876" in result.stdout
     assert captured == {"root": tmp_path, "host": "127.0.0.1", "port": 9876}
+
+
+def test_new_project_does_not_copy_live_vertex_credentials(tmp_path: Path) -> None:
+    repo_source = tmp_path / "repo-source"
+    project_path = tmp_path / "new-project"
+    _write_docs(repo_source)
+    (repo_source / "config" / "secrets").mkdir(parents=True, exist_ok=True)
+    (repo_source / "config" / "secrets" / "vertex_service_account.json").write_text(
+        '{"type":"service_account"}\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["new-project", str(project_path), "--repo-source", str(repo_source)])
+
+    assert result.exit_code == 0
+    assert (project_path / ".env.local").exists()
+    assert not (project_path / "config" / "secrets" / "vertex_service_account.json").exists()
+    assert "Copy your Vertex service-account JSON" in result.stdout
+    gitignore_text = (project_path / ".gitignore").read_text(encoding="utf-8")
+    assert "workspaces/" in gitignore_text
+    assert "dist/" in gitignore_text
+
+
+def test_cleanup_local_state_purges_runs_and_generated_paths(tmp_path: Path) -> None:
+    _write_docs(tmp_path)
+    bootstrap_repository(tmp_path)
+    _write_local_runtime_env(tmp_path)
+
+    with build_local_runtime(root=tmp_path) as runtime:
+        report = runtime.run_workflow(request="cleanup demo run", dispatch=False)
+        run_id = report.workflow_run_id
+
+    (tmp_path / "var" / "artifacts" / run_id / "extra").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "workspaces" / "attempt-orphaned").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tmp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "dist").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".pytest_cache").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "autoweave" / "__pycache__").mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(app, ["cleanup-local-state", "--root", str(tmp_path), "--all-runs"])
+
+    assert result.exit_code == 0
+    assert "purged_runs=1" in result.stdout
+    assert run_id in result.stdout
+    assert not (tmp_path / "var" / "artifacts").exists()
+    assert not (tmp_path / "workspaces").exists()
+    assert not (tmp_path / "tmp").exists()
+    assert not (tmp_path / "dist").exists()
+    assert not (tmp_path / ".pytest_cache").exists()
+    assert not (tmp_path / "autoweave" / "__pycache__").exists()
+
+    with build_local_runtime(root=tmp_path) as runtime:
+        remaining_runs = runtime.storage.workflow_repository.list_workflow_runs()
+        assert remaining_runs == []

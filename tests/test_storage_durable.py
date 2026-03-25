@@ -334,6 +334,84 @@ def test_postgres_repository_persists_canonical_state_across_reopen(
         reopened.close()
 
 
+def test_postgres_repository_delete_workflow_run_removes_canonical_rows(
+    postgres_repo: PostgresWorkflowRepository,
+) -> None:
+    repo = postgres_repo
+    graph = _graph("run-delete")
+    repo.save_graph(graph)
+    attempt = repo.save_attempt(
+        TaskAttemptRecord(task_id=graph.tasks[1].id, attempt_number=1, agent_definition_id="agent-backend")
+    )
+    repo.save_human_request(
+        HumanRequestRecord(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[4].id,
+            task_attempt_id=attempt.id,
+            request_type=HumanRequestType.CLARIFICATION,
+            question="Need clarification?",
+            context_summary="cleanup test",
+        )
+    )
+    repo.save_approval_request(
+        ApprovalRequestRecord(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[5].id,
+            task_attempt_id=attempt.id,
+            approval_type="merge",
+            reason="cleanup test",
+        )
+    )
+    repo.append_event(
+        EventRecord(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[1].id,
+            task_attempt_id=attempt.id,
+            event_type="task.started",
+            source="worker",
+        )
+    )
+    repo.save_artifact(
+        _artifact(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[1].id,
+            task_attempt_id=attempt.id,
+            artifact_type="contract",
+            title="Backend contract",
+            summary="cleanup me",
+        )
+    )
+    repo.save_decision(
+        DecisionRecord(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[1].id,
+            task_attempt_id=attempt.id,
+            title="Cleanup",
+            decision_text="delete run",
+            rationale="exercise purge path",
+        )
+    )
+    repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="workflow_run",
+            scope_id=graph.workflow_run.id,
+            memory_layer=MemoryLayer.EPISODIC,
+            content="transient demo memory",
+        )
+    )
+
+    assert repo.delete_workflow_run(graph.workflow_run.id) is True
+    assert repo.list_workflow_runs() == []
+    assert repo.list_attempts_for_run(graph.workflow_run.id) == []
+    assert repo.list_human_requests_for_run(graph.workflow_run.id) == []
+    assert repo.list_approval_requests_for_run(graph.workflow_run.id) == []
+    assert repo.list_events(graph.workflow_run.id) == []
+    assert repo.list_artifacts_for_run(graph.workflow_run.id) == []
+    assert repo.list_memory_entries("workflow_run", graph.workflow_run.id) == []
+    assert repo.delete_workflow_run(graph.workflow_run.id) is False
+
+
 def test_artifact_registry_persists_visibility_and_supersession(
     postgres_repo: PostgresWorkflowRepository, tmp_path: Path, live_settings: LocalEnvironmentSettings
 ) -> None:

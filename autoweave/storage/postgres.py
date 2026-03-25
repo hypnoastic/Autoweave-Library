@@ -277,6 +277,53 @@ class PostgresWorkflowRepository:
         edges = [TaskEdgeRecord.model_validate_json(row["data_json"]) for row in edge_rows]
         return WorkflowGraph(workflow_run=workflow_run, tasks=tasks, edges=edges)
 
+    def delete_workflow_run(self, workflow_run_id: str) -> bool:
+        with self._connect() as conn:
+            workflow_row = conn.execute(
+                sql.SQL("SELECT id FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
+                (workflow_run_id,),
+            ).fetchone()
+            if workflow_row is None:
+                return False
+            task_rows = conn.execute(
+                sql.SQL("SELECT id FROM {} WHERE workflow_run_id = %s").format(self._qualified("tasks")),
+                (workflow_run_id,),
+            ).fetchall()
+            task_ids = [str(row["id"]) for row in task_rows]
+            if task_ids:
+                conn.execute(
+                    sql.SQL(
+                        "DELETE FROM {} WHERE scope_type = %s AND scope_id = ANY(%s)"
+                    ).format(self._qualified("memory_entries")),
+                    ("task", task_ids),
+                )
+            conn.execute(
+                sql.SQL("DELETE FROM {} WHERE scope_type = %s AND scope_id = %s").format(
+                    self._qualified("memory_entries")
+                ),
+                ("workflow_run", workflow_run_id),
+            )
+            for table in (
+                "events",
+                "artifacts",
+                "approval_requests",
+                "human_requests",
+                "decisions",
+                "attempts",
+                "edges",
+                "tasks",
+            ):
+                conn.execute(
+                    sql.SQL("DELETE FROM {} WHERE workflow_run_id = %s").format(self._qualified(table)),
+                    (workflow_run_id,),
+                )
+            conn.execute(
+                sql.SQL("DELETE FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
+                (workflow_run_id,),
+            )
+            conn.commit()
+        return True
+
     def list_workflow_runs(self) -> list[WorkflowRunRecord]:
         with self._connect() as conn:
             rows = conn.execute(

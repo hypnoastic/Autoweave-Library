@@ -4,7 +4,7 @@ from pathlib import Path
 
 from autoweave.artifacts import FilesystemArtifactStore, InMemoryArtifactRegistry
 from autoweave.graph import SQLiteGraphProjectionBackend
-from autoweave.models import ArtifactRecord, ArtifactStatus, EventRecord
+from autoweave.models import ArtifactRecord, ArtifactStatus, EventRecord, MemoryEntryRecord, MemoryLayer
 from autoweave.settings import CANONICAL_VERTEX_CREDENTIALS, LocalEnvironmentSettings
 from autoweave.storage import SQLiteWorkflowRepository, build_local_storage_wiring
 from autoweave.storage.wiring import resolve_artifact_root
@@ -218,6 +218,39 @@ def test_context_service_returns_typed_miss_when_task_missing(tmp_path: Path) ->
     assert lookup.found is False
     assert lookup.miss is not None
     assert lookup.miss.reason.value == "not_found"
+    if hasattr(bundle.workflow_repository, "close"):
+        bundle.workflow_repository.close()
+    if hasattr(bundle.graph_projection, "close"):
+        bundle.graph_projection.close()
+
+
+def test_sqlite_repository_delete_workflow_run_cleans_memory_and_canonical_rows(tmp_path: Path) -> None:
+    settings = LocalEnvironmentSettings.load(root=Path("."), materialize_vertex_credentials=False)
+    settings = settings.model_copy(
+        update={
+            "artifact_store_url": (tmp_path / "artifacts").resolve().as_uri(),
+            "autoweave_canonical_backend": "sqlite",
+            "autoweave_graph_backend": "sqlite",
+            "autoweave_state_dir": (tmp_path / "state").resolve(),
+        }
+    )
+    bundle = build_local_storage_wiring(settings)
+    repo = bundle.workflow_repository
+    graph = _example_graph(repo)
+    repo.save_graph(graph)
+    repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="workflow_run",
+            scope_id=graph.workflow_run.id,
+            memory_layer=MemoryLayer.EPISODIC,
+            content="cleanup me",
+        )
+    )
+
+    assert repo.delete_workflow_run(graph.workflow_run.id) is True
+    assert repo.list_workflow_runs() == []
+    assert repo.list_memory_entries("workflow_run", graph.workflow_run.id) == []
     if hasattr(bundle.workflow_repository, "close"):
         bundle.workflow_repository.close()
     if hasattr(bundle.graph_projection, "close"):

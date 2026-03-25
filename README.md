@@ -122,13 +122,10 @@ This will create a new directory with the following structure:
 - `.env.local`
 - `.gitignore`
 
-After running the command, follow the instructions to complete the setup.
+After running the command, follow the instructions to complete the setup. The command scaffolds the expected credential path, but it does not copy live secret material into the new project.
 
 ```bash
 mkdir -p /tmp/autoweave-demo-project/docs /tmp/autoweave-demo-project/config/secrets
-cp docs/autoweave_high_level_architecture.md /tmp/autoweave-demo-project/docs/
-cp docs/autoweave_implementation_spec.md /tmp/autoweave-demo-project/docs/
-cp docs/autoweave_diagrams_source.md /tmp/autoweave-demo-project/docs/
 cp config/secrets/vertex_service_account.json /tmp/autoweave-demo-project/config/secrets/vertex_service_account.json
 cp .env.local /tmp/autoweave-demo-project/.env.local
 ```
@@ -142,6 +139,16 @@ Then bootstrap and run the installed CLI:
 /tmp/autoweave-demo-venv/bin/autoweave run-workflow --root /tmp/autoweave-demo-project --request "Build a small clothing ecommerce storefront with a homepage, category grid, product detail page, cart handoff, and Stripe checkout." --dispatch --max-steps 6
 /tmp/autoweave-demo-venv/bin/autoweave ui --root /tmp/autoweave-demo-project
 ```
+
+## Cleanup local state
+
+To wipe stale demo history and generated local residue:
+
+```bash
+python3 -m apps.cli.main cleanup-local-state --root . --all-runs
+```
+
+This purges canonical workflow runs, local artifact payloads, workspaces, caches, and other generated residue without touching tracked library code.
 
 ## Current status
 

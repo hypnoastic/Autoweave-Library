@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -157,6 +158,30 @@ class LocalWorkflowRunReport:
         return lines
 
 
+@dataclass(slots=True, frozen=True)
+class LocalCleanupReport:
+    selected_run_ids: tuple[str, ...]
+    purged_run_ids: tuple[str, ...]
+    missing_run_ids: tuple[str, ...]
+    deleted_paths: tuple[Path, ...]
+    projection_cleared: bool
+
+    def summary_lines(self) -> list[str]:
+        lines = [
+            f"selected_runs={len(self.selected_run_ids)}",
+            f"purged_runs={len(self.purged_run_ids)}",
+            f"missing_runs={len(self.missing_run_ids)}",
+            f"projection_cleared={'yes' if self.projection_cleared else 'no'}",
+        ]
+        if self.purged_run_ids:
+            lines.append(f"purged_run_ids={', '.join(self.purged_run_ids)}")
+        if self.missing_run_ids:
+            lines.append(f"missing_run_ids={', '.join(self.missing_run_ids)}")
+        for path in self.deleted_paths:
+            lines.append(f"deleted_path={path}")
+        return lines
+
+
 @dataclass(slots=True)
 class LocalRuntime:
     settings: LocalEnvironmentSettings
@@ -212,14 +237,15 @@ class LocalRuntime:
         )
 
         storage = build_local_storage_wiring(settings)
+        loaded_from_repository = True
         if workflow_run_id is not None:
             canonical_graph = storage.workflow_repository.get_graph(workflow_run_id)
         else:
             try:
                 canonical_graph = storage.workflow_repository.get_graph(workflow_graph.workflow_run.id)
             except KeyError:
-                storage.workflow_repository.save_graph(workflow_graph)
-                canonical_graph = storage.workflow_repository.get_graph(workflow_graph.workflow_run.id)
+                canonical_graph = workflow_graph
+                loaded_from_repository = False
         router = VertexModelRouter(
             vertex_config,
             preferred_profile=settings.autoweave_vertex_profile_override,
@@ -255,7 +281,9 @@ class LocalRuntime:
             openhands_client=openhands_client,
             orchestration=orchestration,
         )
-        runtime._last_persisted_graph_signature = runtime._graph_structure_signature()
+        runtime._last_persisted_graph_signature = (
+            runtime._graph_structure_signature() if loaded_from_repository else None
+        )
         return runtime
 
     def close(self) -> None:
@@ -381,6 +409,12 @@ class LocalRuntime:
             tuple(task.id for task in graph.tasks),
             tuple(edge.id for edge in graph.edges),
         )
+
+    def _ensure_canonical_graph_seeded(self) -> None:
+        if self._last_persisted_graph_signature is not None:
+            return
+        self.storage.workflow_repository.save_graph(self.orchestration.state.graph)
+        self._last_persisted_graph_signature = self._graph_structure_signature()
 
     def _reset_example_workflow_run(self) -> None:
         workflow_definition_id = f"{self.workflow_definition.name}:{self.workflow_definition.version}"
@@ -1146,6 +1180,7 @@ class LocalRuntime:
         dispatch: bool = False,
         stream_events: Iterable[Mapping[str, Any] | OpenHandsStreamEvent] | None = None,
     ) -> LocalExampleRunReport:
+        self._ensure_canonical_graph_seeded()
         schedule = self.orchestration.schedule()
         if not schedule.ready_tasks:
             self._reset_example_workflow_run()
@@ -1174,6 +1209,48 @@ class LocalRuntime:
             stream_event_types=task_report.stream_event_types,
             artifact_ids=task_report.artifact_ids,
             failure_reason=task_report.failure_reason,
+        )
+
+    def purge_workflow_runs(
+        self,
+        workflow_run_ids: Iterable[str],
+        *,
+        clear_projection_namespace: bool = False,
+    ) -> LocalCleanupReport:
+        selected_run_ids = tuple(dict.fromkeys(run_id.strip() for run_id in workflow_run_ids if run_id and run_id.strip()))
+        repository = self.storage.workflow_repository
+        if not hasattr(repository, "delete_workflow_run"):
+            raise RuntimeError("workflow repository does not support run deletion")
+
+        purged_run_ids: list[str] = []
+        missing_run_ids: list[str] = []
+        deleted_paths: list[Path] = []
+
+        for workflow_run_id in selected_run_ids:
+            try:
+                attempts = repository.list_attempts_for_run(workflow_run_id)
+                artifacts = repository.list_artifacts_for_run(workflow_run_id)
+            except KeyError:
+                attempts = []
+                artifacts = []
+            deleted = repository.delete_workflow_run(workflow_run_id)
+            if not deleted:
+                missing_run_ids.append(workflow_run_id)
+                continue
+            purged_run_ids.append(workflow_run_id)
+            deleted_paths.extend(self._cleanup_workflow_run_files(workflow_run_id, attempts=attempts, artifacts=artifacts))
+
+        projection_cleared = False
+        if clear_projection_namespace and hasattr(self.storage.graph_projection, "clear_namespace"):
+            self.storage.graph_projection.clear_namespace()
+            projection_cleared = True
+
+        return LocalCleanupReport(
+            selected_run_ids=selected_run_ids,
+            purged_run_ids=tuple(purged_run_ids),
+            missing_run_ids=tuple(missing_run_ids),
+            deleted_paths=tuple(deleted_paths),
+            projection_cleared=projection_cleared,
         )
 
     def run_workflow(
@@ -1243,6 +1320,34 @@ class LocalRuntime:
             dispatch=dispatch,
             max_steps=max_steps,
         )
+
+    def _cleanup_workflow_run_files(
+        self,
+        workflow_run_id: str,
+        *,
+        attempts: Iterable[TaskAttemptRecord],
+        artifacts: Iterable[ArtifactRecord],
+    ) -> list[Path]:
+        deleted_paths: list[Path] = []
+        artifact_root = self.settings.artifact_store_path() / workflow_run_id
+        self._remove_path_if_exists(artifact_root, deleted_paths)
+        for artifact in artifacts:
+            artifact_dir = self.settings.artifact_store_path() / artifact.workflow_run_id / artifact.task_id / artifact.id
+            self._remove_path_if_exists(artifact_dir, deleted_paths)
+        for attempt in attempts:
+            workspace_path = self.worker_adapter.workspace_policy.workspace_path_for_attempt(attempt.id)
+            self._remove_path_if_exists(workspace_path, deleted_paths)
+        return deleted_paths
+
+    @staticmethod
+    def _remove_path_if_exists(path: Path, deleted_paths: list[Path]) -> None:
+        if not path.exists():
+            return
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        deleted_paths.append(path)
 
     def resolve_approval_request(
         self,

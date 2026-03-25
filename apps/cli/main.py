@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-
 import shutil
 import subprocess
 import typer
@@ -13,6 +11,7 @@ from apps.cli.bootstrap import bootstrap_repository, repository_root
 from apps.cli.validation import ValidationResult, validate_repository
 from autoweave.local_runtime import build_local_runtime
 from autoweave.monitoring import serve_dashboard
+from autoweave.settings import LocalEnvironmentSettings
 
 app = typer.Typer(help="AutoWeave terminal control plane.")
 
@@ -148,6 +147,51 @@ def ui(
     serve_dashboard(root=root_path, host=host, port=port)
 
 
+@app.command("cleanup-local-state")
+def cleanup_local_state(
+    root: Path | None = typer.Option(None, "--root", help="Project root to clean"),
+    workflow_run_id: list[str] | None = typer.Option(
+        None,
+        "--workflow-run-id",
+        help="Specific workflow run ID to purge; repeat for multiple runs",
+    ),
+    all_runs: bool = typer.Option(
+        False,
+        "--all-runs",
+        help="Purge every canonical workflow run instead of only stale demo runs",
+    ),
+    drop_generated: bool = typer.Option(
+        True,
+        "--drop-generated/--keep-generated",
+        help="Delete local generated residue such as artifacts, workspaces, tmp, dist, and caches",
+    ),
+) -> None:
+    """Purge stale canonical runs and local generated runtime residue."""
+
+    root_path = repository_root(root)
+    with build_local_runtime(root=root_path) as runtime:
+        selected_run_ids = _select_cleanup_run_ids(
+            runtime,
+            workflow_run_ids=workflow_run_id or [],
+            all_runs=all_runs,
+        )
+        report = runtime.purge_workflow_runs(
+            selected_run_ids,
+            clear_projection_namespace=all_runs and runtime.settings.autoweave_graph_backend == "neo4j",
+        )
+        runtime_settings = runtime.settings
+
+    deleted_generated_paths = (
+        _cleanup_generated_paths(root_path, runtime_settings, all_runs=all_runs) if drop_generated else ()
+    )
+
+    for line in report.summary_lines():
+        typer.echo(line)
+    typer.echo(f"deleted_generated_paths={len(deleted_generated_paths)}")
+    for path in deleted_generated_paths:
+        typer.echo(f"deleted_generated_path={path}")
+
+
 @app.command("new-project")
 def new_project(
     path: Path = typer.Argument(..., help="Directory to initialize the new project in"),
@@ -172,7 +216,6 @@ def new_project(
         "docs/autoweave_high_level_architecture.md",
         "docs/autoweave_implementation_spec.md",
         "docs/autoweave_diagrams_source.md",
-        "config/secrets/vertex_service_account.json",
     ]
     for file in files_to_copy:
         _copy_file(repo_source / file, path / file)
@@ -208,14 +251,15 @@ __pycache__/
 env/
 venv/
 
-# Docker
-.dockerignore
-docker-compose.yml
-
 # AutoWeave
 .env.local
 config/secrets/
 var/
+workspaces/
+workspace/
+tmp/
+dist/
+.pytest_cache/
 """,
         encoding="utf-8",
     )
@@ -223,15 +267,74 @@ var/
 
     typer.echo("\nProject setup complete. Next steps:")
     typer.echo("1. Fill in the placeholder values in .env.local")
-    typer.echo(f"2. Run 'autoweave bootstrap --root {path}'")
-    typer.echo(f"3. Run 'autoweave validate --root {path}'")
+    typer.echo(f"2. Copy your Vertex service-account JSON to {path / 'config/secrets/vertex_service_account.json'}")
+    typer.echo(f"3. Run 'autoweave bootstrap --root {path}'")
+    typer.echo(f"4. Run 'autoweave validate --root {path}'")
 
 
 def _copy_file(source: Path, dest: Path) -> None:
     """Copy a file, creating the destination directory if it doesn't exist."""
+    if not source.exists():
+        raise FileNotFoundError(f"template file is missing: {source}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(source, dest)
     typer.echo(f"Copied {source} to {dest}")
+
+
+def _select_cleanup_run_ids(runtime, *, workflow_run_ids: list[str], all_runs: bool) -> tuple[str, ...]:
+    if workflow_run_ids:
+        return tuple(dict.fromkeys(run_id.strip() for run_id in workflow_run_ids if run_id and run_id.strip()))
+
+    known_runs = runtime.storage.workflow_repository.list_workflow_runs()
+    if all_runs:
+        return tuple(run.id for run in known_runs)
+    return tuple(
+        run.id
+        for run in known_runs
+        if "_run_demo_" in run.id or run.id.endswith("_run_demo") or run.id == "team_1.0_run"
+    )
+
+
+def _cleanup_generated_paths(
+    root: Path,
+    settings: LocalEnvironmentSettings,
+    *,
+    all_runs: bool,
+) -> tuple[Path, ...]:
+    deleted_paths: list[Path] = []
+    base_candidates = [
+        root / ".DS_Store",
+        root / ".pytest_cache",
+        root / "dist",
+        root / "tmp",
+        root / "workspace",
+    ]
+    if all_runs:
+        base_candidates.extend(
+            [
+                settings.artifact_store_path(),
+                root / "workspaces",
+                root / "var" / "observability",
+                settings.state_dir(),
+            ]
+        )
+    for candidate in base_candidates:
+        _delete_path(candidate, deleted_paths)
+    for candidate in sorted(root.rglob("__pycache__"), reverse=True):
+        if ".venv" in candidate.parts:
+            continue
+        _delete_path(candidate, deleted_paths)
+    return tuple(deleted_paths)
+
+
+def _delete_path(path: Path, deleted_paths: list[Path]) -> None:
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+    deleted_paths.append(path)
 
 
 def main() -> None:

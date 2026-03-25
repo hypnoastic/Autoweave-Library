@@ -933,3 +933,87 @@ Current limitation after this slice:
 
 - on a cold monitor start, the initial snapshot can still sit in `loading` for a noticeable amount of time while the real Postgres-backed state is assembled
 - this slice fixes clarity once data is available, but it does not yet make the initial remote-backed snapshot instant
+
+## Repository cleanup and stale-history purge plan: 2026-03-25
+
+What I found before making cleanup changes:
+
+- the tracked library surface is already concentrated in the expected areas:
+  - `autoweave/`
+  - `apps/cli/`
+  - `agents/`
+  - `configs/`
+  - `docs/`
+  - `tests/`
+- the main repo clutter is not tracked library code; it is local runtime residue:
+  - `var/`
+  - `workspace/`
+  - `workspaces/`
+  - `tmp/`
+  - `dist/`
+  - Python cache directories
+- multiple stale demo workflow runs remained in canonical storage and could still appear in the monitor even after the user considered the demo complete
+- `AGENTS.md` had leaked worker-generated boutique-store context appended to the repository instructions, which is not appropriate as persistent repo guidance
+- `apps/cli/main.py:new-project` currently copies the real Vertex service-account JSON from the source repo into a new project, which is an unsafe default for a reusable library tool
+
+Cleanup goals for this pass:
+
+- add a safe purge path for stale local demo runs in canonical storage
+- remove stale local runtime/artifact/workspace residue so the repo reflects the library rather than historical execution debris
+- restore `AGENTS.md` to repo-level instructions only
+- fix the fresh-project flow so it references credentials without copying secret material by default
+- read through the touched paths for other small but concrete cleanup issues rather than stopping at the stale-run purge
+
+## Cleanup implementation and purge results: 2026-03-25
+
+What changed in this slice:
+
+- added canonical workflow-run deletion support across the repository boundary:
+  - `WorkflowRepository.delete_workflow_run(...)`
+  - in-memory repository cleanup
+  - SQLite canonical cleanup
+  - Postgres canonical cleanup
+- added `cleanup-local-state` to the CLI so stale workflow runs and local generated residue can be cleared without manual DB surgery
+- the cleanup command now removes:
+  - selected canonical workflow runs
+  - run-scoped artifact payload directories
+  - attempt-scoped workspaces
+  - generated local residue such as `dist/`, `tmp/`, `.pytest_cache`, `workspace/`, `workspaces/`, local observability/state directories, and repo `__pycache__` trees
+- `new-project` no longer copies the live Vertex service-account JSON into fresh projects
+- fresh projects now instruct the user to place the credential file at `config/secrets/vertex_service_account.json` explicitly
+- generated project `.gitignore` now ignores actual runtime residue (`workspaces/`, `workspace/`, `tmp/`, `dist/`, `.pytest_cache`) instead of oddly ignoring Docker files
+- removed leaked run-specific boutique-store notes from `AGENTS.md`
+- removed the duplicate root-level Vertex JSON and the stray screenshot file from the repo root
+
+Real cleanup executed in this repo:
+
+- ran `AUTOWEAVE_GRAPH_BACKEND=sqlite .venv/bin/python -m apps.cli.main cleanup-local-state --root . --all-runs`
+- purged 17 canonical workflow runs from the configured Postgres backend, including all stale `team_1.0_run_demo_*` runs, `team_1.0_run`, and the leftover `run-1`
+- deleted local generated residue under:
+  - `var/artifacts/`
+  - `workspaces/`
+  - `workspace/`
+  - `var/observability/`
+  - `var/state/`
+  - `tmp/`
+  - `dist/`
+  - `.pytest_cache/`
+  - repo-local `__pycache__/` trees
+
+Validation completed:
+
+- targeted unit coverage for cleanup and repository deletion paths passed
+- full `pytest -q` passed
+- `python3 -m compileall autoweave apps tests` passed
+
+Remaining limitation from this slice:
+
+- live backend validation against the external Postgres/Neo4j fixtures is currently partially blocked by sandbox DNS resolution for the configured Neon and Neo4j Aura hosts
+- the new cleanup logic itself is covered locally, and the real repo purge was executed successfully through an escalated run against the canonical backend
+
+Additional cleanup bug fixed during verification:
+
+- `LocalRuntime.build(...)` previously seeded `team_1.0_run` into canonical storage just by loading the runtime with no explicit execution request
+- that side effect was causing the operator UI or any read-only bootstrap path to recreate a baseline run after cleanup
+- the runtime now keeps the default graph ephemeral until an execution path explicitly seeds it
+- after stopping the stale pre-fix UI server and rerunning cleanup, a direct Postgres repository query confirmed `canonical_run_count 0`

@@ -215,6 +215,43 @@ class SQLiteWorkflowRepository:
         edges = [TaskEdgeRecord.model_validate_json(row["data_json"]) for row in edge_rows]
         return WorkflowGraph(workflow_run=workflow_run, tasks=tasks, edges=edges)
 
+    def delete_workflow_run(self, workflow_run_id: str) -> bool:
+        with _connect(self.database_path) as conn:
+            workflow_row = conn.execute(
+                "SELECT id FROM workflow_runs WHERE id = ?",
+                (workflow_run_id,),
+            ).fetchone()
+            if workflow_row is None:
+                return False
+            task_rows = conn.execute(
+                "SELECT id FROM tasks WHERE workflow_run_id = ?",
+                (workflow_run_id,),
+            ).fetchall()
+            task_ids = [str(row["id"]) for row in task_rows]
+            if task_ids:
+                placeholders = ", ".join(["?"] * len(task_ids))
+                conn.execute(
+                    f"DELETE FROM memory_entries WHERE scope_type = 'task' AND scope_id IN ({placeholders})",
+                    task_ids,
+                )
+            conn.execute(
+                "DELETE FROM memory_entries WHERE scope_type = 'workflow_run' AND scope_id = ?",
+                (workflow_run_id,),
+            )
+            for table in (
+                "events",
+                "artifacts",
+                "approval_requests",
+                "human_requests",
+                "decisions",
+                "attempts",
+                "edges",
+                "tasks",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE workflow_run_id = ?", (workflow_run_id,))
+            conn.execute("DELETE FROM workflow_runs WHERE id = ?", (workflow_run_id,))
+        return True
+
     def list_workflow_runs(self) -> list[WorkflowRunRecord]:
         with _connect(self.database_path) as conn:
             rows = conn.execute("SELECT data_json FROM workflow_runs").fetchall()

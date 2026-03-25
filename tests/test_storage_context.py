@@ -275,6 +275,51 @@ def test_repository_save_attempt_is_idempotent_for_same_attempt_id() -> None:
     active = repo.list_active_attempts(graph.workflow_run.id)
     assert [item.id for item in active] == [attempt.id]
 
+
+def test_repository_delete_workflow_run_removes_canonical_records() -> None:
+    repo = InMemoryWorkflowRepository()
+    graph = build_example_graph("run-1", "proj-1")
+    repo.save_graph(graph)
+    attempt = repo.save_attempt(make_attempt(graph.tasks[2].id))
+    registry = InMemoryArtifactRegistry(repo)
+    artifact = registry.put_artifact(
+        make_artifact(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[2].id,
+            task_attempt_id=attempt.id,
+            produced_by_role="backend",
+            artifact_type="implementation",
+            title="Backend implementation",
+            status=ArtifactStatus.FINAL,
+            summary="done",
+            storage_uri="blob://run-1/backend-impl",
+            checksum="sha-impl",
+        )
+    )
+    repo.save_event(
+        EventRecord(
+            workflow_run_id=graph.workflow_run.id,
+            task_id=graph.tasks[2].id,
+            task_attempt_id=attempt.id,
+            event_type="task.completed",
+            source="worker",
+            sequence_no=1,
+        )
+    )
+
+    assert repo.delete_workflow_run(graph.workflow_run.id) is True
+    assert repo.list_workflow_runs() == []
+    assert repo.list_attempts_for_run(graph.workflow_run.id) == []
+    assert repo.list_artifacts_for_run(graph.workflow_run.id) == []
+    assert repo.list_events(graph.workflow_run.id) == []
+    assert repo.delete_workflow_run(graph.workflow_run.id) is False
+    try:
+        repo.get_graph(graph.workflow_run.id)
+    except KeyError:
+        pass
+    else:  # pragma: no cover - defensive
+        raise AssertionError("deleted workflow run should not remain readable")
+
 def test_large_artifact_returns_handle_and_unrelated_workflows_are_hidden() -> None:
     repo = InMemoryWorkflowRepository()
     graph = build_example_graph("run-1", "proj-1")

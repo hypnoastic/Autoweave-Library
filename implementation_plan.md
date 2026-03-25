@@ -396,6 +396,26 @@
 - run ordering fix so the most relevant active run is surfaced before older blocked history once snapshot data is available
 - regression coverage for execution-status payloads and blocked/paused run presentation
 
+### M16
+
+- add canonical repository support for deleting a workflow run and all subordinate records so stale local demo history can be purged safely
+- add local cleanup tooling/CLI for stale demo runs and ignored runtime residue
+- fix `new-project` so it no longer copies live secret material into a fresh project by default
+- restore repo instruction files to repository guidance only and remove leaked run-specific memory
+- rerun CLI, packaging, and test coverage after cleanup to ensure the repository still behaves as a library-first codebase
+- completed implementation:
+  - repository deletion support now exists for in-memory, SQLite, and Postgres-backed canonical stores
+  - `cleanup-local-state` now purges canonical runs plus local generated residue
+  - fresh-project scaffolding now requires an explicit user copy of the Vertex JSON instead of silently copying secrets
+  - local runtime bootstrap no longer seeds `team_1.0_run` into canonical storage for read-only usage such as the monitor or doctor paths
+  - repo-level instruction and root clutter cleanup were applied to the live workspace
+- validation outcome:
+  - targeted cleanup/storage tests passed
+  - full `pytest -q` passed
+  - `compileall` passed
+  - live repo cleanup succeeded against the canonical backend
+  - full live backend fixture validation remains partially gated by current sandbox DNS failures for the configured Neon and Neo4j Aura hosts
+
 ## Credential-dependent gates
 
 - Use the existing local env and secret material already present in the workspace rather than inventing new credentials.
