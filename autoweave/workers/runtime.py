@@ -644,6 +644,24 @@ def resolve_openhands_reasoning_effort(
 def build_openhands_conversation_request(launch_payload: dict[str, Any]) -> dict[str, Any]:
     """Translate an AutoWeave launch payload into the official OpenHands conversation API."""
 
+    task_input_json = launch_payload.get("task_input_json")
+    clarification_answers = None
+    latest_human_answer = None
+    if isinstance(task_input_json, Mapping):
+        raw_clarification_answers = task_input_json.get("clarification_answers")
+        if isinstance(raw_clarification_answers, Mapping):
+            clarification_answers = {
+                str(question).strip(): str(answer).strip()
+                for question, answer in raw_clarification_answers.items()
+                if str(question).strip() and str(answer).strip()
+            }
+        raw_latest_human_answer = task_input_json.get("latest_human_answer")
+        if isinstance(raw_latest_human_answer, Mapping):
+            latest_human_answer = {
+                "question": str(raw_latest_human_answer.get("question") or "").strip(),
+                "answer_text": str(raw_latest_human_answer.get("answer_text") or "").strip(),
+            }
+
     prompt_lines = [
         line
         for line in (
@@ -656,7 +674,26 @@ def build_openhands_conversation_request(launch_payload: dict[str, Any]) -> dict
         )
         if line and not line.endswith(": ")
     ]
-    task_input_json = launch_payload.get("task_input_json")
+    if clarification_answers:
+        prompt_lines.extend(
+            (
+                "Resolved Clarifications:",
+                "Treat the following answers as confirmed human decisions. Do not ask the same questions again unless they conflict with a new hard blocker.",
+            )
+        )
+        for question, answer in sorted(clarification_answers.items()):
+            prompt_lines.append(f"- {question} -> {answer}")
+    if (
+        latest_human_answer
+        and latest_human_answer["question"]
+        and latest_human_answer["answer_text"]
+    ):
+        prompt_lines.extend(
+            (
+                "Latest Human Answer:",
+                f"- {latest_human_answer['question']} -> {latest_human_answer['answer_text']}",
+            )
+        )
     if isinstance(task_input_json, Mapping) and task_input_json:
         prompt_lines.extend(
             (

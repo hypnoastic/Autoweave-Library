@@ -1085,10 +1085,111 @@ def test_local_runtime_reuses_answered_semantic_clarification_without_reopening_
     assert len(manager_calls) >= 3
     reused_prompt = manager_calls[-2]["body"]["initial_message"]["content"][0]["text"]
     retry_prompt = manager_calls[-1]["body"]["initial_message"]["content"][0]["text"]
+    assert "Resolved Clarifications:" in reused_prompt
+    assert "Do not ask the same questions again" in reused_prompt
     assert "clarification_answers" in reused_prompt
     assert "Private study rooms are being booked." in reused_prompt
+    assert "Resolved Clarifications:" in retry_prompt
     assert "clarification_answers" in retry_prompt
     assert "Private study rooms are being booked." in retry_prompt
+
+
+def test_local_runtime_fails_after_duplicate_answered_clarification_loop_limit(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    event_search_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal event_search_count
+        body: dict[str, object] = {}
+        if request.content:
+            body = json.loads(request.content.decode("utf-8"))
+        calls.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "headers": {key.lower(): value for key, value in request.headers.items()},
+                "body": body,
+            }
+        )
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/api/conversations":
+            return httpx.Response(
+                201,
+                json={
+                    "id": "conversation-1",
+                    "workspace": body.get("workspace", {}),
+                    "agent": body.get("agent", {}),
+                    "execution_status": "running",
+                    "persistence_dir": "workspace/conversations/conversation-1",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-1":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "conversation-1",
+                    "execution_status": "finished",
+                    "persistence_dir": "workspace/conversations/conversation-1",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-1/events/search":
+            event_search_count += 1
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "type": "message",
+                            "message": "Before I proceed, I need clarification. What exact thing is being booked?",
+                            "terminal": False,
+                        }
+                    ],
+                    "next_page_id": None,
+                },
+            )
+        return httpx.Response(404, json={"error": "not found"})
+
+    transport = httpx.MockTransport(handler)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        runtime.runtime_config.clarification_retry_limit = 2
+        initial = runtime.run_workflow(
+            request="Build a modern booking app.",
+            dispatch=True,
+            max_steps=1,
+            stream_events_by_task={
+                "manager_plan": (
+                    {
+                        "type": "message",
+                        "message": "Before I proceed, I need clarification. What exact thing is being booked?",
+                        "terminal": False,
+                    },
+                ),
+            },
+        )
+        request = runtime.storage.workflow_repository.list_human_requests_for_run(initial.workflow_run_id)[0]
+        resumed = runtime.answer_human_request(
+            workflow_run_id=initial.workflow_run_id,
+            request_id=request.id,
+            answer_text="Private study rooms are being booked.",
+            answered_by="operator",
+            dispatch=True,
+            max_steps=3,
+        )
+        task = runtime.storage.workflow_repository.get_task_by_key(initial.workflow_run_id, "manager_plan")
+        events = runtime.storage.workflow_repository.list_events(initial.workflow_run_id)
+
+    assert initial.open_human_questions == ("What exact thing is being booked?",)
+    assert resumed.workflow_status == "failed"
+    assert resumed.open_human_questions == ()
+    assert resumed.step_reports[-1].task_key == "manager_plan"
+    assert resumed.step_reports[-1].task_state == "failed"
+    assert resumed.step_reports[-1].failure_reason == "duplicate_answered_clarification_loop: What exact thing is being booked?"
+    assert task.state.value == "failed"
+    assert any(event.event_type == "attempt.duplicate_answered_clarification_loop" for event in events)
 
 
 def test_local_runtime_waits_for_worker_requested_approval_and_can_resume_after_resolution(

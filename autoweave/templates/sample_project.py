@@ -445,6 +445,7 @@ def render_runtime_files() -> dict[Path, str]:
                 "execution_backend": "celery",
                 "celery_queue_names": ["dispatch"],
                 "celery_result_expires_seconds": 3600,
+                "clarification_retry_limit": 2,
                 "default_concurrency": 4,
                 "retry_policy": {"max_attempts": 3, "backoff_seconds": 15},
                 "heartbeat_intervals": {"worker": 15, "lease": 60},

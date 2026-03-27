@@ -203,6 +203,7 @@ celery_queue_names:
   - dispatch
   - workers
 celery_result_expires_seconds: 7200
+clarification_retry_limit: 4
 default_concurrency: 4
 retry_policy:
   max_attempts: 3
@@ -217,6 +218,7 @@ retry_policy:
     assert loaded.execution_backend == "celery"
     assert loaded.celery_queue_names == ["dispatch", "workers"]
     assert loaded.celery_result_expires_seconds == 7200
+    assert loaded.clarification_retry_limit == 4
     assert loaded.default_concurrency == 4
 
 
@@ -267,6 +269,39 @@ def test_openhands_request_includes_task_input_json_block() -> None:
     text = request["initial_message"]["content"][0]["text"]
     assert "Task Input JSON:" in text
     assert '"user_request": "build a clothing ecommerce site"' in text
+
+
+def test_openhands_request_elevates_resolved_clarifications() -> None:
+    request = build_openhands_conversation_request(
+        {
+            "provider_name": "VertexAI",
+            "model_name": "gemini-3-flash-preview",
+            "task_id": "task-1",
+            "task_attempt_id": "attempt-1",
+            "task_role": "manager",
+            "task_title": "Manager plan",
+            "task_description": "Plan the requested workflow.",
+            "task_input_json": {
+                "user_request": "build a clothing ecommerce site",
+                "clarification_answers": {
+                    "What exact thing is being booked?": "Private study rooms.",
+                },
+                "latest_human_answer": {
+                    "question": "What exact thing is being booked?",
+                    "answer_text": "Private study rooms.",
+                },
+            },
+            "route_reason": "role=manager",
+            "workspace_path": "/workspace/workspaces/attempt-1",
+            "runtime_policy": {"reasoning_effort": "none"},
+        }
+    )
+
+    text = request["initial_message"]["content"][0]["text"]
+    assert "Resolved Clarifications:" in text
+    assert "Do not ask the same questions again" in text
+    assert "- What exact thing is being booked? -> Private study rooms." in text
+    assert "Latest Human Answer:" in text
 
 
 def test_human_input_marker_is_normalized_to_requires_human() -> None:

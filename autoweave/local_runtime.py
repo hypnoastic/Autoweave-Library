@@ -478,6 +478,34 @@ class LocalRuntime:
         latest = matches[-1]
         return latest, str(latest.answer_text or "").strip()
 
+    def _record_reused_clarification(
+        self,
+        *,
+        task: TaskRecord,
+        question: str,
+        answer_text: str,
+    ) -> tuple[TaskRecord, int]:
+        updated_input = dict(task.input_json)
+        reuse_counts = updated_input.get("clarification_retry_counts")
+        if not isinstance(reuse_counts, dict):
+            reuse_counts = {}
+        normalized_question = self._normalize_question_key(question)
+        current_value = reuse_counts.get(normalized_question, 0)
+        try:
+            reuse_count = max(0, int(current_value)) + 1
+        except (TypeError, ValueError):
+            reuse_count = 1
+        reuse_counts[normalized_question] = reuse_count
+        updated_input["clarification_retry_counts"] = reuse_counts
+        updated_input["clarification_loop_guard"] = {
+            "question": question,
+            "answer_text": answer_text,
+            "reuse_count": reuse_count,
+        }
+        updated_task = task.model_copy(update={"input_json": updated_input})
+        self.orchestration.state.update_task(updated_task)
+        return self.orchestration.state.task(task.id), reuse_count
+
     def _memory_scopes_for_task(self, task: TaskRecord) -> tuple[str, ...]:
         template = self._task_template(task.task_key, task)
         agent_definition = self.agent_definition(task.assigned_role)
@@ -997,6 +1025,12 @@ class LocalRuntime:
             return max(0.0, float(raw_value))
         except (TypeError, ValueError):
             return 0.0
+
+    def _clarification_retry_limit(self) -> int:
+        try:
+            return max(1, int(self.runtime_config.clarification_retry_limit))
+        except (TypeError, ValueError):
+            return 2
 
     def _retryable_failure_reason(self, events: Iterable[OpenHandsStreamEvent]) -> str | None:
         for event in reversed(tuple(events)):
@@ -1555,11 +1589,64 @@ class LocalRuntime:
                         answer_text=answer_text,
                         reused=True,
                     )
-                    current_task, current_attempt = self.orchestration.finalize_attempt_failure(
+                    current_task, reuse_count = self._record_reused_clarification(
+                        task=current_task,
+                        question=answered_request.question,
+                        answer_text=answer_text,
+                    )
+                    retry_limit = self._clarification_retry_limit()
+                    current_attempt = self.orchestration.abort_attempt(current_attempt.id)
+                    if reuse_count >= retry_limit:
+                        diagnostic_reason = (
+                            "duplicate_answered_clarification_loop: "
+                            f"{answered_request.question}"
+                        )
+                        current_task = current_task.model_copy(
+                            update={
+                                "output_json": {
+                                    **current_task.output_json,
+                                    "result_summary": diagnostic_reason,
+                                }
+                            }
+                        )
+                        self.orchestration.state.update_task(current_task)
+                        current_task = self.orchestration.fail_task(
+                            current_task.id,
+                            reason=diagnostic_reason,
+                        )
+                        self._persist_memory_entry(
+                            task=current_task,
+                            content=(
+                                f"Manager clarification loop detected for {current_task.title}: "
+                                f"{answered_request.question} Answer: {answer_text}"
+                            ),
+                            memory_layer=MemoryLayer.EPISODIC,
+                            metadata_json={
+                                "kind": "duplicate_answered_clarification_loop",
+                                "human_request_id": answered_request.id,
+                                "reuse_count": reuse_count,
+                                "retry_limit": retry_limit,
+                            },
+                        )
+                        self._publish_lifecycle_event(
+                            task=current_task,
+                            attempt=current_attempt,
+                            event_type="attempt.duplicate_answered_clarification_loop",
+                            source="orchestrator",
+                            payload_json={
+                                "human_request_id": answered_request.id,
+                                "question": answered_request.question,
+                                "reuse_count": reuse_count,
+                                "retry_limit": retry_limit,
+                            },
+                        )
+                        self._sync_canonical_state()
+                        current_task = self.orchestration.state.task(current_task.id)
+                        current_attempt = self.orchestration.state.attempt(current_attempt.id)
+                        break
+                    current_task = self.orchestration.block_task(
                         current_task.id,
-                        current_attempt.id,
                         reason=f"reused_answered_clarification:{answered_request.id}",
-                        recoverable=True,
                     )
                     current_task = self.orchestration.unblock_task(current_task.id)
                     self._persist_memory_entry(
@@ -1582,6 +1669,8 @@ class LocalRuntime:
                         payload_json={
                             "human_request_id": answered_request.id,
                             "question": answered_request.question,
+                            "reuse_count": reuse_count,
+                            "retry_limit": retry_limit,
                         },
                     )
                     self._sync_canonical_state()
@@ -2025,6 +2114,8 @@ class LocalRuntime:
                             ),
                             None,
                         )
+                        if final_task.state == TaskState.FAILED and not failure_reason:
+                            failure_reason = str(final_task.output_json.get("result_summary", "")).strip() or None
                         artifact_ids = tuple((*artifact_ids, *replay_artifact_ids))
                         self._sync_canonical_state()
                         retryable_reason = self._retryable_failure_reason(combined_stream)
