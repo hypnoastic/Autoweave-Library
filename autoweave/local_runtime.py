@@ -20,6 +20,9 @@ from autoweave.models import (
     ArtifactStatus,
     EdgeType,
     EventRecord,
+    HumanRequestRecord,
+    HumanRequestStatus,
+    HumanRequestType,
     MemoryEntryRecord,
     MemoryLayer,
     TaskEdgeRecord,
@@ -405,6 +408,75 @@ class LocalRuntime:
         if len(normalized) <= max_chars:
             return normalized
         return normalized[: max_chars - 3].rstrip() + "..."
+
+    @staticmethod
+    def _normalize_question_key(question: str) -> str:
+        normalized = " ".join(str(question).split()).strip()
+        normalized = normalized.rstrip("?.! \t")
+        return normalized.casefold()
+
+    def _apply_human_answer_to_task_input(
+        self,
+        *,
+        task: TaskRecord,
+        request: HumanRequestRecord,
+        answer_text: str,
+        reused: bool = False,
+    ) -> TaskRecord:
+        updated_input = dict(task.input_json)
+        latest_human_answer = {
+            "request_id": request.id,
+            "question": request.question,
+            "answer_text": answer_text,
+        }
+        if reused:
+            latest_human_answer["reused_answer"] = True
+        updated_input["latest_human_answer"] = latest_human_answer
+
+        human_answers = updated_input.get("human_answers")
+        if not isinstance(human_answers, dict):
+            human_answers = {}
+        human_answers[request.id] = answer_text
+        updated_input["human_answers"] = human_answers
+
+        clarification_answers = updated_input.get("clarification_answers")
+        if not isinstance(clarification_answers, dict):
+            clarification_answers = {}
+        clarification_answers[request.question] = answer_text
+        updated_input["clarification_answers"] = clarification_answers
+
+        updated_task = task.model_copy(update={"input_json": updated_input})
+        self.orchestration.state.update_task(updated_task)
+        return self.orchestration.state.task(task.id)
+
+    def _answered_clarification_for_question(
+        self,
+        *,
+        task: TaskRecord,
+        question: str,
+    ) -> tuple[HumanRequestRecord, str] | None:
+        normalized_question = self._normalize_question_key(question)
+        if not normalized_question:
+            return None
+        matches: list[HumanRequestRecord] = []
+        for request in self.orchestration.state.human_requests.values():
+            if request.task_id != task.id:
+                continue
+            if request.request_type != HumanRequestType.CLARIFICATION:
+                continue
+            if request.status != HumanRequestStatus.ANSWERED:
+                continue
+            answer_text = str(request.answer_text or "").strip()
+            if not answer_text:
+                continue
+            if self._normalize_question_key(request.question) != normalized_question:
+                continue
+            matches.append(request)
+        if not matches:
+            return None
+        matches.sort(key=lambda item: (item.created_at, item.id))
+        latest = matches[-1]
+        return latest, str(latest.answer_text or "").strip()
 
     def _memory_scopes_for_task(self, task: TaskRecord) -> tuple[str, ...]:
         template = self._task_template(task.task_key, task)
@@ -1471,6 +1543,51 @@ class LocalRuntime:
                 payload_json=stream_event.payload_json | {"message": stream_event.message, "outcome": stream_event.outcome},
             )
             if stream_event.requires_human:
+                answered_clarification = self._answered_clarification_for_question(
+                    task=current_task,
+                    question=stream_event.message,
+                )
+                if answered_clarification is not None:
+                    answered_request, answer_text = answered_clarification
+                    current_task = self._apply_human_answer_to_task_input(
+                        task=current_task,
+                        request=answered_request,
+                        answer_text=answer_text,
+                        reused=True,
+                    )
+                    current_task, current_attempt = self.orchestration.finalize_attempt_failure(
+                        current_task.id,
+                        current_attempt.id,
+                        reason=f"reused_answered_clarification:{answered_request.id}",
+                        recoverable=True,
+                    )
+                    current_task = self.orchestration.unblock_task(current_task.id)
+                    self._persist_memory_entry(
+                        task=current_task,
+                        content=(
+                            f"Reused answered clarification for {current_task.title}: "
+                            f"{answered_request.question} Answer: {answer_text}"
+                        ),
+                        memory_layer=MemoryLayer.SEMANTIC,
+                        metadata_json={
+                            "kind": "human_answer_reused",
+                            "human_request_id": answered_request.id,
+                        },
+                    )
+                    self._publish_lifecycle_event(
+                        task=current_task,
+                        attempt=current_attempt,
+                        event_type="attempt.answered_human_request_reused",
+                        source="orchestrator",
+                        payload_json={
+                            "human_request_id": answered_request.id,
+                            "question": answered_request.question,
+                        },
+                    )
+                    self._sync_canonical_state()
+                    current_task = self.orchestration.state.task(current_task.id)
+                    current_attempt = self.orchestration.state.attempt(current_attempt.id)
+                    break
                 self.orchestration.needs_input_attempt(current_attempt.id)
                 request = self.orchestration.request_clarification(
                     task_id=current_task.id,
@@ -2221,18 +2338,11 @@ class LocalRuntime:
         active_attempt = self._latest_active_attempt(task.id)
         if active_attempt is not None:
             self.orchestration.abort_attempt(active_attempt.id)
-        updated_input = dict(task.input_json)
-        updated_input["latest_human_answer"] = {
-            "request_id": request.id,
-            "question": request.question,
-            "answer_text": answer_text,
-        }
-        human_answers = updated_input.get("human_answers")
-        if not isinstance(human_answers, dict):
-            human_answers = {}
-        human_answers[request.id] = answer_text
-        updated_input["human_answers"] = human_answers
-        self.orchestration.state.update_task(task.model_copy(update={"input_json": updated_input}))
+        task = self._apply_human_answer_to_task_input(
+            task=task,
+            request=request,
+            answer_text=answer_text,
+        )
         self.orchestration.answer_human_request(request_id, answer_text=answer_text, answered_by=answered_by)
         self._persist_memory_entry(
             task=task,

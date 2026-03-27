@@ -947,7 +947,148 @@ def test_local_runtime_can_resume_after_human_answer(tmp_path: Path, monkeypatch
     assert len(conversation_calls) == 2
     resumed_prompt = conversation_calls[1]["body"]["initial_message"]["content"][0]["text"]
     assert "latest_human_answer" in resumed_prompt
+    assert "clarification_answers" in resumed_prompt
     assert "Use Stripe only and ship within the US." in resumed_prompt
+
+
+def test_local_runtime_reuses_answered_semantic_clarification_without_reopening_human_loop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    event_search_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal event_search_count
+        body: dict[str, object] = {}
+        if request.content:
+            body = json.loads(request.content.decode("utf-8"))
+        calls.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "headers": {key.lower(): value for key, value in request.headers.items()},
+                "body": body,
+            }
+        )
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/api/conversations":
+            return httpx.Response(
+                201,
+                json={
+                    "id": "conversation-1",
+                    "workspace": body.get("workspace", {}),
+                    "agent": body.get("agent", {}),
+                    "execution_status": "running",
+                    "persistence_dir": "workspace/conversations/conversation-1",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-1":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "conversation-1",
+                    "execution_status": "finished",
+                    "persistence_dir": "workspace/conversations/conversation-1",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-1/events/search":
+            event_search_count += 1
+            if event_search_count == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "type": "message",
+                                "message": "Before I proceed, I need clarification. What exact thing is being booked?",
+                                "terminal": False,
+                            }
+                        ],
+                        "next_page_id": None,
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "type": "progress",
+                            "message": "worker started",
+                            "outcome": "running",
+                            "terminal": False,
+                        },
+                        {
+                            "type": "complete",
+                            "message": "task completed",
+                            "outcome": "success",
+                            "terminal": True,
+                            "artifact": {
+                                "artifact_type": "workflow_plan",
+                                "title": "Manager plan",
+                                "summary": "manager plan completed",
+                                "status": "final",
+                                "storage_uri": "file:///tmp/manager-plan.txt",
+                                "checksum": "sha256:plan",
+                                "metadata_json": {"content_type": "text/plain"},
+                            },
+                        },
+                    ],
+                    "next_page_id": None,
+                },
+            )
+        return httpx.Response(404, json={"error": "not found"})
+
+    transport = httpx.MockTransport(handler)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        initial = runtime.run_workflow(
+            request="Build a modern booking app.",
+            dispatch=True,
+            max_steps=1,
+            stream_events_by_task={
+                "manager_plan": (
+                    {
+                        "type": "message",
+                        "message": "Before I proceed, I need clarification. What exact thing is being booked?",
+                        "terminal": False,
+                    },
+                ),
+            },
+        )
+        request = runtime.storage.workflow_repository.list_human_requests_for_run(initial.workflow_run_id)[0]
+        resumed = runtime.answer_human_request(
+            workflow_run_id=initial.workflow_run_id,
+            request_id=request.id,
+            answer_text="Private study rooms are being booked.",
+            answered_by="operator",
+            dispatch=True,
+            max_steps=3,
+        )
+        requests = runtime.storage.workflow_repository.list_human_requests_for_run(initial.workflow_run_id)
+
+    assert initial.open_human_questions == ("What exact thing is being booked?",)
+    assert resumed.open_human_questions == ()
+    assert resumed.dispatched_task_keys[:2] == ("manager_plan", "manager_plan")
+    assert any(report.task_key == "manager_plan" and report.task_state == "completed" for report in resumed.step_reports)
+    assert len(requests) == 1
+    assert requests[0].status.value == "answered"
+    conversation_calls = [call for call in calls if call["path"] == "/api/conversations"]
+    manager_calls = [
+        call
+        for call in conversation_calls
+        if "Role: manager" in str(call["body"]["initial_message"]["content"][0]["text"])
+        and "Title: Manager plan" in str(call["body"]["initial_message"]["content"][0]["text"])
+    ]
+    assert len(manager_calls) >= 3
+    reused_prompt = manager_calls[-2]["body"]["initial_message"]["content"][0]["text"]
+    retry_prompt = manager_calls[-1]["body"]["initial_message"]["content"][0]["text"]
+    assert "clarification_answers" in reused_prompt
+    assert "Private study rooms are being booked." in reused_prompt
+    assert "clarification_answers" in retry_prompt
+    assert "Private study rooms are being booked." in retry_prompt
 
 
 def test_local_runtime_waits_for_worker_requested_approval_and_can_resume_after_resolution(
