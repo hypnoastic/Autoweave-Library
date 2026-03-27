@@ -673,6 +673,51 @@ class LocalRuntime:
                 return event.message or "worker_empty_response_loop"
         return None
 
+    def _downgrade_recovered_terminal_failures(
+        self,
+        events: Iterable[OpenHandsStreamEvent],
+    ) -> list[OpenHandsStreamEvent]:
+        event_list = list(events)
+        if not event_list:
+            return event_list
+
+        recovered_events: list[OpenHandsStreamEvent] = []
+        seen_nonfailure_terminal = False
+        success_outcomes = {"success", "succeeded", "complete", "completed"}
+        failure_outcomes = {"failure", "failed", "error", "timeout", "stuck", "crash", "orphaned"}
+
+        for event in reversed(event_list):
+            outcome = (event.outcome or "").lower()
+            is_nonfailure_terminal = event.terminal and (
+                outcome in success_outcomes
+                or event.event_type in {"complete", "completed", "final"}
+                or event.requires_human
+                or event.approval_required
+            )
+            is_failure_terminal = event.terminal and (
+                outcome in failure_outcomes
+                or event.event_type == "error"
+            )
+            if seen_nonfailure_terminal and is_failure_terminal:
+                event = replace(
+                    event,
+                    event_type="diagnostic",
+                    terminal=False,
+                    outcome="recovered_error",
+                    payload_json={
+                        **event.payload_json,
+                        "recovered_after_terminal_event": True,
+                        "original_event_type": event.event_type,
+                        "original_outcome": event.outcome,
+                    },
+                )
+            recovered_events.append(event)
+            if is_nonfailure_terminal:
+                seen_nonfailure_terminal = True
+
+        recovered_events.reverse()
+        return recovered_events
+
     def _semantic_manager_clarification(
         self,
         *,
@@ -848,6 +893,7 @@ class LocalRuntime:
                     terminal=True,
                 )
             )
+        normalized = self._downgrade_recovered_terminal_failures(normalized)
 
         debug_payload = {
             "conversation_id": conversation_id,

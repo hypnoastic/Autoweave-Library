@@ -367,6 +367,81 @@ def _progress_only_transport(calls: list[dict[str, object]]) -> httpx.MockTransp
     return httpx.MockTransport(handler)
 
 
+def _recoverable_agent_error_transport(calls: list[dict[str, object]]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body: dict[str, object] = {}
+        if request.content:
+            body = json.loads(request.content.decode("utf-8"))
+        calls.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "headers": {key.lower(): value for key, value in request.headers.items()},
+                "body": body,
+            }
+        )
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/api/conversations":
+            return httpx.Response(
+                201,
+                json={
+                    "id": "conversation-recovered-error",
+                    "workspace": body.get("workspace", {}),
+                    "agent": body.get("agent", {}),
+                    "execution_status": "running",
+                    "persistence_dir": "workspace/conversations/conversation-recovered-error",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-recovered-error":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "conversation-recovered-error",
+                    "execution_status": "finished",
+                    "persistence_dir": "workspace/conversations/conversation-recovered-error",
+                },
+            )
+        if request.url.path == "/api/conversations/conversation-recovered-error/events/search":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "kind": "AgentErrorEvent",
+                            "tool_name": "file_editor",
+                            "error": "invalid file_editor command",
+                        },
+                        {
+                            "kind": "ActionEvent",
+                            "tool_name": "finish",
+                            "action": {
+                                "kind": "FinishAction",
+                                "message": "Recovered from a tool error and completed the plan.",
+                            },
+                        },
+                        {
+                            "kind": "ObservationEvent",
+                            "tool_name": "finish",
+                            "observation": {
+                                "kind": "FinishObservation",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Recovered from a tool error and completed the plan.",
+                                    }
+                                ],
+                            },
+                        },
+                    ],
+                    "next_page_id": None,
+                },
+            )
+        return httpx.Response(404, json={"error": "not found"})
+
+    return httpx.MockTransport(handler)
+
+
 def test_local_environment_settings_normalize_vertex_credentials(tmp_path: Path) -> None:
     _prepare_local_root(tmp_path)
 
@@ -501,6 +576,26 @@ def test_local_runtime_treats_finish_tool_events_as_success(tmp_path: Path, monk
     manifests = [runtime.storage.artifact_store.read_manifest(artifact_id) for artifact_id in example.artifact_ids]
     assert {manifest["artifact"]["artifact_type"] for manifest in manifests} == {"openhands_replay", "workflow_plan"}
     assert any(manifest["payload"] == "Completed the manager plan for the storefront." for manifest in manifests)
+
+
+def test_local_runtime_ignores_recovered_agent_error_when_conversation_finishes_successfully(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recoverable_agent_error_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        example = runtime.run_example(dispatch=True)
+
+    assert example.task_state == "completed"
+    assert example.attempt_state == "succeeded"
+    assert example.failure_reason is None
+    assert example.stream_event_types == ("diagnostic", "complete")
+    manifests = [runtime.storage.artifact_store.read_manifest(artifact_id) for artifact_id in example.artifact_ids]
+    replay_manifest = next(manifest for manifest in manifests if manifest["artifact"]["artifact_type"] == "openhands_replay")
+    assert replay_manifest["payload"]["execution_status"] == "finished"
 
 
 def test_local_runtime_retries_poll_timeout_before_failing(tmp_path: Path, monkeypatch) -> None:
