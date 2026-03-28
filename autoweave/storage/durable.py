@@ -65,6 +65,18 @@ def _upsert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
     )
 
 
+def _memory_entry_belongs_to_workflow_run(
+    entry: MemoryEntryRecord,
+    *,
+    workflow_run_id: str,
+    task_ids: set[str],
+) -> bool:
+    metadata = entry.metadata_json if isinstance(entry.metadata_json, dict) else {}
+    metadata_workflow_run_id = str(metadata.get("workflow_run_id") or "").strip()
+    metadata_task_id = str(metadata.get("task_id") or "").strip()
+    return metadata_workflow_run_id == workflow_run_id or metadata_task_id in task_ids
+
+
 @dataclass(frozen=True)
 class DurableStorePaths:
     canonical: Path
@@ -218,11 +230,12 @@ class SQLiteWorkflowRepository:
     def delete_workflow_run(self, workflow_run_id: str) -> bool:
         with _connect(self.database_path) as conn:
             workflow_row = conn.execute(
-                "SELECT id FROM workflow_runs WHERE id = ?",
+                "SELECT data_json FROM workflow_runs WHERE id = ?",
                 (workflow_run_id,),
             ).fetchone()
             if workflow_row is None:
                 return False
+            workflow_run = WorkflowRunRecord.model_validate_json(workflow_row["data_json"])
             task_rows = conn.execute(
                 "SELECT id FROM tasks WHERE workflow_run_id = ?",
                 (workflow_run_id,),
@@ -238,6 +251,25 @@ class SQLiteWorkflowRepository:
                 "DELETE FROM memory_entries WHERE scope_type = 'workflow_run' AND scope_id = ?",
                 (workflow_run_id,),
             )
+            project_memory_rows = conn.execute(
+                "SELECT id, data_json FROM memory_entries WHERE scope_type = 'project' AND scope_id = ?",
+                (workflow_run.project_id,),
+            ).fetchall()
+            stale_project_memory_ids = [
+                str(row["id"])
+                for row in project_memory_rows
+                if _memory_entry_belongs_to_workflow_run(
+                    MemoryEntryRecord.model_validate_json(row["data_json"]),
+                    workflow_run_id=workflow_run_id,
+                    task_ids=set(task_ids),
+                )
+            ]
+            if stale_project_memory_ids:
+                placeholders = ", ".join(["?"] * len(stale_project_memory_ids))
+                conn.execute(
+                    f"DELETE FROM memory_entries WHERE id IN ({placeholders})",
+                    stale_project_memory_ids,
+                )
             for table in (
                 "events",
                 "artifacts",

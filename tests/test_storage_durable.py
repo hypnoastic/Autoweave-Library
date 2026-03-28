@@ -400,6 +400,32 @@ def test_postgres_repository_delete_workflow_run_removes_canonical_rows(
             content="transient demo memory",
         )
     )
+    repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="project",
+            scope_id=graph.workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="cleanup me too",
+            metadata_json={
+                "workflow_run_id": graph.workflow_run.id,
+                "task_id": graph.tasks[1].id,
+            },
+        )
+    )
+    unrelated_memory = repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="project",
+            scope_id=graph.workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="keep me",
+            metadata_json={
+                "workflow_run_id": "run-unrelated",
+                "task_id": "task-unrelated",
+            },
+        )
+    )
 
     assert repo.delete_workflow_run(graph.workflow_run.id) is True
     assert repo.list_workflow_runs() == []
@@ -409,6 +435,7 @@ def test_postgres_repository_delete_workflow_run_removes_canonical_rows(
     assert repo.list_events(graph.workflow_run.id) == []
     assert repo.list_artifacts_for_run(graph.workflow_run.id) == []
     assert repo.list_memory_entries("workflow_run", graph.workflow_run.id) == []
+    assert [entry.id for entry in repo.list_memory_entries("project", graph.workflow_run.project_id)] == [unrelated_memory.id]
     assert repo.delete_workflow_run(graph.workflow_run.id) is False
 
 

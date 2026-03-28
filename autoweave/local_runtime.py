@@ -1129,6 +1129,31 @@ class LocalRuntime:
                 return []
         return []
 
+    def _upstream_final_artifacts(
+        self,
+        task: TaskRecord,
+        *,
+        artifact_types: set[str] | None = None,
+    ) -> list[ArtifactRecord]:
+        artifacts = self.storage.context_service.get_upstream_artifacts(
+            task_id=task.id,
+            status=ArtifactStatus.FINAL.value,
+        )
+        if not artifact_types:
+            return list(artifacts)
+        return [artifact for artifact in artifacts if artifact.artifact_type in artifact_types]
+
+    def _review_supporting_summaries(self, task: TaskRecord) -> list[str]:
+        summaries: list[str] = []
+        for artifact in self._upstream_final_artifacts(
+            task,
+            artifact_types={"integration_report", "integration_rework_report"},
+        ):
+            summary = artifact.summary.strip()
+            if summary:
+                summaries.append(summary)
+        return summaries
+
     def _review_feedback_text(self, task: TaskRecord) -> str:
         candidates: list[str] = []
         for artifact in self._task_artifacts(task):
@@ -1140,6 +1165,7 @@ class LocalRuntime:
         result_summary = str(task.output_json.get("result_summary", "")).strip()
         if result_summary:
             candidates.append(result_summary)
+        candidates.extend(self._review_supporting_summaries(task))
         deduped: list[str] = []
         seen: set[str] = set()
         for candidate in candidates:
@@ -1150,22 +1176,46 @@ class LocalRuntime:
             seen.add(key)
         return "\n\n".join(deduped)
 
-    @staticmethod
-    def _review_decision(review_feedback: str) -> str:
+    def _review_has_validation_evidence(self, task: TaskRecord, review_feedback: str) -> bool:
         lower_feedback = review_feedback.strip().lower()
         if not lower_feedback:
-            return "approve"
+            return False
+        evidence_cues = (
+            "validated",
+            "verified",
+            "smoke test passed",
+            "smoke-tested",
+            "build passed",
+            "tests passed",
+            "previewed",
+            "ran locally",
+            "manual qa passed",
+            "checked in browser",
+            "api smoke test passed",
+            "runnable",
+            "working end to end",
+            "verified end to end",
+        )
+        if any(cue in lower_feedback for cue in evidence_cues):
+            return True
+        for summary in self._review_supporting_summaries(task):
+            lower_summary = summary.lower()
+            if any(cue in lower_summary for cue in evidence_cues):
+                return True
+        return False
+
+    def _review_decision(self, task: TaskRecord, review_feedback: str) -> str:
+        lower_feedback = review_feedback.strip().lower()
+        if not lower_feedback:
+            return "revise"
         if "review_decision: revise" in lower_feedback:
             return "revise"
-        if "review_decision: approve" in lower_feedback:
-            return "approve"
+        explicit_approve = "review_decision: approve" in lower_feedback
         approve_cues = (
             "no blocking issues",
             "ready to ship",
             "recommendation: approve",
         )
-        if any(cue in lower_feedback for cue in approve_cues):
-            return "approve"
         revise_cues = (
             "changes requested",
             "recommendation: revise",
@@ -1175,12 +1225,28 @@ class LocalRuntime:
             "before release",
             "blocking issue",
             "blocker",
+            "build failed",
+            "compile error",
+            "failed to compile",
+            "type error",
+            "lint failed",
+            "manual patch",
+            "not verified",
+            "could not run",
+            "did not run",
+            "untested",
+            "runtime error",
+            "missing asset",
+            "requires follow-up",
         )
         if any(cue in lower_feedback for cue in revise_cues):
             return "revise"
-        return "approve"
+        has_validation_evidence = self._review_has_validation_evidence(task, review_feedback)
+        if explicit_approve or any(cue in lower_feedback for cue in approve_cues):
+            return "approve" if has_validation_evidence else "revise"
+        return "revise"
 
-    def _build_rework_task(
+    def _build_dynamic_task(
         self,
         *,
         workflow_run_id: str,
@@ -1188,10 +1254,11 @@ class LocalRuntime:
         title: str,
         description: str,
         assigned_role: str,
-        review_feedback: str,
         required_artifacts: list[str],
         produced_artifacts: list[str],
         route_hints: list[str],
+        extra_input_json: Mapping[str, Any] | None = None,
+        approval_requirements: list[str] | None = None,
     ) -> TaskRecord:
         return TaskRecord(
             workflow_run_id=workflow_run_id,
@@ -1200,14 +1267,17 @@ class LocalRuntime:
             description=description,
             assigned_role=assigned_role,
             input_json={
-                "review_feedback": review_feedback,
+                **dict(extra_input_json or {}),
                 "_template_memory_scopes": ["workflow_run", "task"],
                 "_template_route_hints": route_hints,
-                "_template_approval_requirements": [],
+                "_template_approval_requirements": list(approval_requirements or []),
             },
             required_artifact_types_json=required_artifacts,
             produced_artifact_types_json=produced_artifacts,
         )
+
+    def _should_require_release_signoff(self) -> bool:
+        return bool(getattr(self.runtime_config, "require_release_signoff", True))
 
     def _append_review_rework_tasks(
         self,
@@ -1219,7 +1289,7 @@ class LocalRuntime:
             return ()
 
         review_feedback = self._review_feedback_text(review_task)
-        if self._review_decision(review_feedback) != "revise":
+        if self._review_decision(review_task, review_feedback) != "revise":
             return ()
 
         with self._runtime_lock:
@@ -1227,49 +1297,49 @@ class LocalRuntime:
             if {"manager_rework", "backend_rework", "frontend_rework", "integration_rework"} & existing_keys:
                 return ()
 
-        manager_rework = self._build_rework_task(
+        manager_rework = self._build_dynamic_task(
             workflow_run_id=review_task.workflow_run_id,
             task_key="manager_rework",
             title="Manager rework plan",
             description="Turn the single review pass into a concrete rework plan and assign backend/frontend fixes without scheduling another review.",
             assigned_role="manager",
-            review_feedback=review_feedback,
             required_artifacts=["review_notes"],
             produced_artifacts=["rework_plan"],
             route_hints=["planning", "rework"],
+            extra_input_json={"review_feedback": review_feedback},
         )
-        backend_rework = self._build_rework_task(
+        backend_rework = self._build_dynamic_task(
             workflow_run_id=review_task.workflow_run_id,
             task_key="backend_rework",
             title="Backend rework",
             description="Apply the backend-facing fixes called out in the review notes and manager rework plan.",
             assigned_role="backend",
-            review_feedback=review_feedback,
             required_artifacts=["review_notes", "rework_plan"],
             produced_artifacts=["backend_rework"],
             route_hints=["implementation", "rework"],
+            extra_input_json={"review_feedback": review_feedback},
         )
-        frontend_rework = self._build_rework_task(
+        frontend_rework = self._build_dynamic_task(
             workflow_run_id=review_task.workflow_run_id,
             task_key="frontend_rework",
             title="Frontend rework",
             description="Apply the frontend-facing fixes called out in the review notes and manager rework plan.",
             assigned_role="frontend",
-            review_feedback=review_feedback,
             required_artifacts=["review_notes", "rework_plan"],
             produced_artifacts=["frontend_rework"],
             route_hints=["implementation", "rework"],
+            extra_input_json={"review_feedback": review_feedback},
         )
-        integration_rework = self._build_rework_task(
+        integration_rework = self._build_dynamic_task(
             workflow_run_id=review_task.workflow_run_id,
             task_key="integration_rework",
             title="Integration rework",
             description="Re-integrate the backend and frontend fixes from the single review pass and produce the final handoff artifact.",
             assigned_role="backend",
-            review_feedback=review_feedback,
             required_artifacts=["backend_rework", "frontend_rework"],
             produced_artifacts=["integration_rework_report"],
             route_hints=["integration", "rework"],
+            extra_input_json={"review_feedback": review_feedback},
         )
         edges = [
             TaskEdgeRecord(
@@ -1330,6 +1400,67 @@ class LocalRuntime:
             payload_json={
                 "review_decision": "revise",
                 "rework_task_keys": [task.task_key for task in appended_tasks],
+            },
+        )
+        return tuple(task.task_key for task in appended_tasks)
+
+    def _append_release_signoff_task(
+        self,
+        *,
+        trigger_task: TaskRecord,
+        trigger_attempt: TaskAttemptRecord,
+        required_artifacts: list[str],
+        release_context: str,
+    ) -> tuple[str, ...]:
+        if not self._should_require_release_signoff():
+            return ()
+
+        with self._runtime_lock:
+            existing_keys = {task.task_key for task in self.orchestration.state.tasks_by_id.values()}
+            if "release_signoff" in existing_keys:
+                return ()
+
+        release_signoff = self._build_dynamic_task(
+            workflow_run_id=trigger_task.workflow_run_id,
+            task_key="release_signoff",
+            title="Release signoff",
+            description="Wait for operator release signoff, then package the final handoff artifact without scheduling another review pass.",
+            assigned_role="manager",
+            required_artifacts=required_artifacts,
+            produced_artifacts=["release_handoff"],
+            route_hints=["handoff", "approval"],
+            extra_input_json={"release_context": release_context},
+            approval_requirements=["release_signoff"],
+        )
+        edge = TaskEdgeRecord(
+            workflow_run_id=trigger_task.workflow_run_id,
+            from_task_id=trigger_task.id,
+            to_task_id=release_signoff.id,
+            edge_type=EdgeType.HARD,
+            is_hard_dependency=True,
+        )
+        with self._runtime_lock:
+            appended_tasks = self.orchestration.add_dynamic_tasks(
+                tasks=[release_signoff],
+                edges=[edge],
+            )
+        self._persist_memory_entry(
+            task=trigger_task,
+            content=f"Release signoff required after {trigger_task.task_key}: {self._truncate_text(release_context, max_chars=900)}",
+            memory_layer=MemoryLayer.SEMANTIC,
+            metadata_json={
+                "kind": "release_signoff",
+                "release_task_keys": [task.task_key for task in appended_tasks],
+            },
+        )
+        self._publish_lifecycle_event(
+            task=trigger_task,
+            attempt=trigger_attempt,
+            event_type="workflow.release_signoff_required",
+            source="orchestrator",
+            payload_json={
+                "trigger_task_key": trigger_task.task_key,
+                "release_task_keys": [task.task_key for task in appended_tasks],
             },
         )
         return tuple(task.task_key for task in appended_tasks)
@@ -1796,10 +1927,24 @@ class LocalRuntime:
                     memory_layer=MemoryLayer.SEMANTIC,
                     metadata_json={"kind": "task_result", "outcome": "success"},
                 )
-                self._append_review_rework_tasks(
+                rework_task_keys = self._append_review_rework_tasks(
                     review_task=current_task,
                     review_attempt=current_attempt,
                 )
+                if current_task.task_key == "review" and not rework_task_keys:
+                    self._append_release_signoff_task(
+                        trigger_task=current_task,
+                        trigger_attempt=current_attempt,
+                        required_artifacts=["review_notes"],
+                        release_context=self._review_feedback_text(current_task) or terminal_summary,
+                    )
+                elif current_task.task_key == "integration_rework":
+                    self._append_release_signoff_task(
+                        trigger_task=current_task,
+                        trigger_attempt=current_attempt,
+                        required_artifacts=["review_notes", "integration_rework_report"],
+                        release_context=terminal_summary,
+                    )
                 if not artifact_ids and current_task.produced_artifact_types_json:
                     fallback_artifact = ArtifactRecord(
                         workflow_run_id=current_task.workflow_run_id,
@@ -2363,15 +2508,24 @@ class LocalRuntime:
 
         for workflow_run_id in selected_run_ids:
             try:
+                workflow_run = repository.get_graph(workflow_run_id).workflow_run
+                tasks = repository.list_tasks_for_run(workflow_run_id)
                 attempts = repository.list_attempts_for_run(workflow_run_id)
                 artifacts = repository.list_artifacts_for_run(workflow_run_id)
             except KeyError:
+                workflow_run = None
+                tasks = []
                 attempts = []
                 artifacts = []
             deleted = repository.delete_workflow_run(workflow_run_id)
             if not deleted:
                 missing_run_ids.append(workflow_run_id)
                 continue
+            self._purge_memory_store_entries(
+                workflow_run_id=workflow_run_id,
+                project_id=workflow_run.project_id if workflow_run is not None else None,
+                task_ids={task.id for task in tasks},
+            )
             purged_run_ids.append(workflow_run_id)
             deleted_paths.extend(self._cleanup_workflow_run_files(workflow_run_id, attempts=attempts, artifacts=artifacts))
 
@@ -2476,6 +2630,30 @@ class LocalRuntime:
             workspace_path = self.worker_adapter.workspace_policy.workspace_path_for_attempt(attempt.id)
             self._remove_path_if_exists(workspace_path, deleted_paths)
         return deleted_paths
+
+    def _purge_memory_store_entries(
+        self,
+        *,
+        workflow_run_id: str,
+        project_id: str | None,
+        task_ids: set[str],
+    ) -> tuple[str, ...]:
+        metadata_task_ids = set(task_ids)
+        return self.storage.memory_store.delete_matching(
+            lambda entry: (
+                (entry.scope_type == "workflow_run" and entry.scope_id == workflow_run_id)
+                or (entry.scope_type == "task" and entry.scope_id in metadata_task_ids)
+                or (
+                    entry.scope_type == "project"
+                    and project_id is not None
+                    and entry.scope_id == project_id
+                    and (
+                        str(entry.metadata_json.get("workflow_run_id") or "").strip() == workflow_run_id
+                        or str(entry.metadata_json.get("task_id") or "").strip() in metadata_task_ids
+                    )
+                )
+            )
+        )
 
     @staticmethod
     def _remove_path_if_exists(path: Path, deleted_paths: list[Path]) -> None:

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import typer
 
 from apps.cli.bootstrap import bootstrap_repository, migrate_repository, repository_root
@@ -36,6 +37,13 @@ def _echo_migration_result(root_path: Path, *, created: tuple[Path, ...], update
     typer.echo(f"{action}={len(updated)}")
     for path in updated:
         typer.echo(f"{action}_path={path.relative_to(root_path)}")
+
+
+def _resolve_celery_worker_pool(configured_pool: str | None) -> str:
+    normalized = str(configured_pool or "").strip().lower()
+    if normalized and normalized != "auto":
+        return normalized
+    return "solo" if sys.platform == "darwin" else "prefork"
 
 
 @app.command("status")
@@ -204,6 +212,7 @@ def worker(
     concurrency: int = typer.Option(1, "--concurrency", min=1, help="Celery worker concurrency"),
     loglevel: str = typer.Option("info", "--loglevel", help="Celery worker log level"),
     queues: str | None = typer.Option(None, "--queues", help="Comma-separated queue names; defaults to project runtime config"),
+    pool: str | None = typer.Option(None, "--pool", help="Celery worker pool; defaults to runtime config or a local-safe platform default"),
 ) -> None:
     """Run a real Celery worker for queued AutoWeave workflow execution."""
     root_path = repository_root(root)
@@ -215,12 +224,17 @@ def worker(
         typer.echo(f"celery_error={exc}")
         raise typer.Exit(code=1)
     queue_names = [item.strip() for item in (queues.split(",") if queues else dispatcher.queue_names) if item.strip()]
+    configured_pool = pool or getattr(dispatcher.runtime_config, "celery_worker_pool", "auto")
+    selected_pool = _resolve_celery_worker_pool(configured_pool)
     typer.echo(f"celery_queues={','.join(queue_names)}")
+    typer.echo(f"celery_pool={selected_pool}")
     celery_app.worker_main(
         [
             "worker",
             "--loglevel",
             loglevel,
+            "--pool",
+            selected_pool,
             "--concurrency",
             str(concurrency),
             "--queues",

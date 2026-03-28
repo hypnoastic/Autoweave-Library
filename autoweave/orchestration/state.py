@@ -148,7 +148,7 @@ class WorkflowRunState:
                 "workflow_run": workflow_run.model_copy(
                     update={
                         "status": WorkflowRunStatus.COMPLETED,
-                        "ended_at": workflow_run.ended_at or workflow_run.started_at or utc_now(),
+                        "ended_at": workflow_run.ended_at or utc_now(),
                     }
                 )
             }
@@ -161,7 +161,7 @@ class WorkflowRunState:
                 "workflow_run": workflow_run.model_copy(
                     update={
                         "status": WorkflowRunStatus.FAILED,
-                        "ended_at": workflow_run.ended_at or workflow_run.started_at or utc_now(),
+                        "ended_at": workflow_run.ended_at or utc_now(),
                     }
                 )
             }

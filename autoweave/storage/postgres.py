@@ -35,6 +35,18 @@ def _validate_identifier(name: str) -> str:
     return name
 
 
+def _memory_entry_belongs_to_workflow_run(
+    entry: MemoryEntryRecord,
+    *,
+    workflow_run_id: str,
+    task_ids: set[str],
+) -> bool:
+    metadata = entry.metadata_json if isinstance(entry.metadata_json, dict) else {}
+    metadata_workflow_run_id = str(metadata.get("workflow_run_id") or "").strip()
+    metadata_task_id = str(metadata.get("task_id") or "").strip()
+    return metadata_workflow_run_id == workflow_run_id or metadata_task_id in task_ids
+
+
 @dataclass(frozen=True)
 class PostgresRepositoryConfig:
     dsn: str
@@ -280,11 +292,12 @@ class PostgresWorkflowRepository:
     def delete_workflow_run(self, workflow_run_id: str) -> bool:
         with self._connect() as conn:
             workflow_row = conn.execute(
-                sql.SQL("SELECT id FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
                 (workflow_run_id,),
             ).fetchone()
             if workflow_row is None:
                 return False
+            workflow_run = WorkflowRunRecord.model_validate_json(workflow_row["data_json"])
             task_rows = conn.execute(
                 sql.SQL("SELECT id FROM {} WHERE workflow_run_id = %s").format(self._qualified("tasks")),
                 (workflow_run_id,),
@@ -303,6 +316,26 @@ class PostgresWorkflowRepository:
                 ),
                 ("workflow_run", workflow_run_id),
             )
+            project_memory_rows = conn.execute(
+                sql.SQL("SELECT id, data_json FROM {} WHERE scope_type = %s AND scope_id = %s").format(
+                    self._qualified("memory_entries")
+                ),
+                ("project", workflow_run.project_id),
+            ).fetchall()
+            stale_project_memory_ids = [
+                str(row["id"])
+                for row in project_memory_rows
+                if _memory_entry_belongs_to_workflow_run(
+                    MemoryEntryRecord.model_validate_json(row["data_json"]),
+                    workflow_run_id=workflow_run_id,
+                    task_ids=set(task_ids),
+                )
+            ]
+            if stale_project_memory_ids:
+                conn.execute(
+                    sql.SQL("DELETE FROM {} WHERE id = ANY(%s)").format(self._qualified("memory_entries")),
+                    (stale_project_memory_ids,),
+                )
             for table in (
                 "events",
                 "artifacts",

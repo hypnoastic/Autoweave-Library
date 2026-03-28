@@ -10,7 +10,9 @@ from typer.testing import CliRunner
 from apps.cli.bootstrap import AGENT_ROLES, bootstrap_repository
 from apps.cli.main import app
 from apps.cli.validation import validate_repository
+from autoweave.config_models import RuntimeConfig
 from autoweave.local_runtime import build_local_runtime
+from autoweave.models import MemoryEntryRecord, MemoryLayer
 from autoweave.templates import sample_project
 
 
@@ -266,6 +268,8 @@ def test_migrate_project_refreshes_packaged_template_managed_files(tmp_path: Pat
     review_task = next(task for task in migrated_workflow["task_templates"] if task["key"] == "review")
     assert review_task["approval_requirements"] == []
     assert migrated_runtime["execution_backend"] == "celery"
+    assert migrated_runtime["celery_worker_pool"] == "auto"
+    assert migrated_runtime["require_release_signoff"] is True
     assert "updated_path=configs/workflows/team.workflow.yaml" in result.stdout
     assert "updated_path=configs/runtime/runtime.yaml" in result.stdout
 
@@ -328,6 +332,7 @@ def test_worker_command_invokes_celery_worker_main(tmp_path: Path, monkeypatch) 
     class _FakeDispatcher:
         def __init__(self, *, root=None, environ=None):
             self.queue_names = ("dispatch",)
+            self.runtime_config = RuntimeConfig(execution_backend="celery", celery_worker_pool="auto")
 
     class _FakeCeleryApp:
         def worker_main(self, argv: list[str]) -> None:
@@ -340,10 +345,13 @@ def test_worker_command_invokes_celery_worker_main(tmp_path: Path, monkeypatch) 
 
     assert result.exit_code == 0
     assert "celery_queues=dispatch" in result.stdout
+    assert f"celery_pool={'solo' if sys.platform == 'darwin' else 'prefork'}" in result.stdout
     assert captured["argv"] == [
         "worker",
         "--loglevel",
         "warning",
+        "--pool",
+        "solo" if sys.platform == "darwin" else "prefork",
         "--concurrency",
         "2",
         "--queues",
@@ -359,6 +367,21 @@ def test_cleanup_local_state_purges_runs_and_generated_paths(tmp_path: Path) -> 
     with build_local_runtime(root=tmp_path) as runtime:
         report = runtime.run_workflow(request="cleanup demo run", dispatch=False)
         run_id = report.workflow_run_id
+        workflow_run = runtime.storage.workflow_repository.list_workflow_runs()[0]
+        first_task = runtime.storage.workflow_repository.list_tasks_for_run(run_id)[0]
+        runtime.storage.workflow_repository.save_memory_entry(
+            MemoryEntryRecord(
+                project_id=workflow_run.project_id,
+                scope_type="project",
+                scope_id=workflow_run.project_id,
+                memory_layer=MemoryLayer.SEMANTIC,
+                content="cleanup stale project memo",
+                metadata_json={
+                    "workflow_run_id": run_id,
+                    "task_id": first_task.id,
+                },
+            )
+        )
 
     (tmp_path / "var" / "artifacts" / run_id / "extra").mkdir(parents=True, exist_ok=True)
     (tmp_path / "workspaces" / "attempt-orphaned").mkdir(parents=True, exist_ok=True)
@@ -382,6 +405,7 @@ def test_cleanup_local_state_purges_runs_and_generated_paths(tmp_path: Path) -> 
     with build_local_runtime(root=tmp_path) as runtime:
         remaining_runs = runtime.storage.workflow_repository.list_workflow_runs()
         assert remaining_runs == []
+        assert runtime.storage.workflow_repository.list_memory_entries("project", workflow_run.project_id) == []
 
 
 def test_create_agent_command_creates_agent_directory(tmp_path: Path) -> None:

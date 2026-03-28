@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Callable
 
 from autoweave.models import MemoryEntryRecord, MemoryLayer
 
@@ -47,6 +48,21 @@ class InMemoryMemoryStore:
 
     def list_scope(self, scope_type: str, scope_id: str) -> list[MemoryEntryRecord]:
         return [self._entries[entry_id].model_copy(deep=True) for entry_id in self._by_scope.get((scope_type, scope_id), [])]
+
+    def delete_matching(self, predicate: Callable[[MemoryEntryRecord], bool]) -> tuple[str, ...]:
+        deleted_ids: list[str] = []
+        for entry_id, entry in list(self._entries.items()):
+            if not predicate(entry):
+                continue
+            deleted_ids.append(entry_id)
+            self._entries.pop(entry_id, None)
+            scope_key = (entry.scope_type, entry.scope_id)
+            self._by_scope[scope_key] = [
+                existing_id for existing_id in self._by_scope.get(scope_key, []) if existing_id != entry_id
+            ]
+            if not self._by_scope[scope_key]:
+                self._by_scope.pop(scope_key, None)
+        return tuple(deleted_ids)
 
     def compact(self, scope_type: str, scope_id: str) -> MemoryEntryRecord | None:
         entries = self.list_scope(scope_type, scope_id)

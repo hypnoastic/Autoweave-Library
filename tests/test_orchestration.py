@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from textwrap import dedent
 
 import pytest
@@ -238,6 +239,38 @@ def test_approval_rejection_prevents_completion() -> None:
 
     with pytest.raises(StateTransitionError):
         service.complete_task(service.state.task("manager_plan").id)
+
+
+def test_workflow_completion_sets_real_ended_at_timestamp() -> None:
+    graph = example_notifications_workflow_graph()
+    started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    graph = graph.model_copy(
+        update={
+            "workflow_run": graph.workflow_run.model_copy(update={"started_at": started_at}),
+        }
+    )
+    state = WorkflowRunState.from_graph(graph)
+
+    state.mark_workflow_completed()
+
+    assert state.graph.workflow_run.ended_at is not None
+    assert state.graph.workflow_run.ended_at > started_at
+
+
+def test_workflow_failure_sets_real_ended_at_timestamp() -> None:
+    graph = example_notifications_workflow_graph()
+    started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    graph = graph.model_copy(
+        update={
+            "workflow_run": graph.workflow_run.model_copy(update={"started_at": started_at}),
+        }
+    )
+    state = WorkflowRunState.from_graph(graph)
+
+    state.mark_workflow_failed()
+
+    assert state.graph.workflow_run.ended_at is not None
+    assert state.graph.workflow_run.ended_at > started_at
 
 
 def test_unresolved_hard_dependencies_prevent_completion() -> None:

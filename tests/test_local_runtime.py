@@ -16,6 +16,7 @@ from autoweave.artifacts.registry import InMemoryArtifactRegistry
 from autoweave.context.service import InMemoryContextService
 from autoweave.graph.projection import SQLiteGraphProjectionBackend
 from autoweave.memory.store import InMemoryMemoryStore
+from autoweave.models import MemoryEntryRecord, MemoryLayer
 from autoweave.settings import CANONICAL_VERTEX_CREDENTIALS, LocalEnvironmentSettings
 from autoweave.storage.coordination import RedisClient, RedisIdempotencyStore, RedisLeaseManager
 from autoweave.storage.durable import SQLiteWorkflowRepository
@@ -1353,14 +1354,138 @@ def test_local_runtime_adds_single_review_rework_branch_without_second_review(tm
         graph = runtime.storage.workflow_repository.get_graph(report.workflow_run_id)
 
     task_keys = [task.task_key for task in graph.tasks]
-    assert report.workflow_status == "completed"
+    assert report.workflow_status == "running"
     assert report.dispatched_task_keys.count("review") == 1
     assert "manager_rework" in task_keys
     assert "backend_rework" in task_keys
     assert "frontend_rework" in task_keys
     assert "integration_rework" in task_keys
+    assert "release_signoff" in task_keys
+    release_signoff = next(task for task in graph.tasks if task.task_key == "release_signoff")
+    assert release_signoff.state.value == "created"
     assert "review" in report.dispatched_task_keys
     assert "integration_rework" in report.dispatched_task_keys
+
+
+def test_local_runtime_review_requires_validation_evidence_for_approval(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        runtime.run_workflow(
+            request="Build a booking app.",
+            dispatch=False,
+            max_steps=1,
+        )
+        review_task = runtime.orchestration.state.task("review")
+
+        decision = runtime._review_decision(review_task, "REVIEW_DECISION: APPROVE. Looks good.")
+
+    assert decision == "revise"
+
+
+def test_local_runtime_requires_release_signoff_after_single_review_pass(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    def fake_collect(self, *, task, attempt, bootstrap_call, stream_events):
+        if task.task_key == "review":
+            return (
+                [
+                    OpenHandsStreamEvent(event_type="progress", message="review running", outcome="running"),
+                    OpenHandsStreamEvent(
+                        event_type="complete",
+                        message=(
+                            "REVIEW_DECISION: APPROVE. Validated in browser, build passed, "
+                            "and API smoke test passed."
+                        ),
+                        artifact={
+                            "artifact_type": "review_notes",
+                            "title": "Review notes",
+                            "summary": (
+                                "REVIEW_DECISION: APPROVE\n"
+                                "Validated in browser.\n"
+                                "Build passed.\n"
+                                "API smoke test passed."
+                            ),
+                            "status": "final",
+                            "metadata_json": {"content_type": "text/plain"},
+                        },
+                        outcome="success",
+                        terminal=True,
+                    ),
+                ],
+                (),
+            )
+        return (
+            [
+                OpenHandsStreamEvent(event_type="progress", message=f"{task.task_key} running", outcome="running"),
+                OpenHandsStreamEvent(
+                    event_type="complete",
+                    message=f"{task.task_key} completed with runnable validation",
+                    outcome="success",
+                    terminal=True,
+                ),
+            ],
+            (),
+        )
+
+    monkeypatch.setattr("autoweave.local_runtime.LocalRuntime._collect_openhands_stream", fake_collect)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        report = runtime.run_workflow(
+            request="Build a serious booking app and stop for final release signoff.",
+            dispatch=True,
+            max_steps=10,
+        )
+        graph = runtime.storage.workflow_repository.get_graph(report.workflow_run_id)
+        approval_requests = runtime.storage.workflow_repository.list_approval_requests_for_run(report.workflow_run_id)
+
+    release_signoff = next(task for task in graph.tasks if task.task_key == "release_signoff")
+    assert report.workflow_status == "running"
+    assert report.open_approval_reasons == ("Approval required before dispatch: release_signoff",)
+    assert release_signoff.state.value == "waiting_for_approval"
+    assert len(approval_requests) == 1
+    assert approval_requests[0].approval_type == "release_signoff"
+
+
+def test_local_runtime_purge_workflow_runs_clears_project_memory_store_entries(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        report = runtime.run_workflow(request="cleanup memory", dispatch=False, max_steps=1)
+        workflow_run = runtime.storage.workflow_repository.list_workflow_runs()[0]
+        task = runtime.storage.workflow_repository.list_tasks_for_run(report.workflow_run_id)[0]
+        memory_entry = MemoryEntryRecord(
+            project_id=workflow_run.project_id,
+            scope_type="project",
+            scope_id=workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="stale project memory for cleanup",
+            metadata_json={
+                "workflow_run_id": report.workflow_run_id,
+                "task_id": task.id,
+            },
+        )
+        runtime.storage.workflow_repository.save_memory_entry(memory_entry)
+        runtime.storage.memory_store.write(memory_entry)
+
+        assert runtime.storage.context_service.list_memory_entries("project", workflow_run.project_id)
+
+        cleanup = runtime.purge_workflow_runs([report.workflow_run_id])
+
+        assert cleanup.purged_run_ids == (report.workflow_run_id,)
+        assert runtime.storage.context_service.list_memory_entries("project", workflow_run.project_id) == []
 
 
 def test_cli_doctor_and_run_example_use_composed_runtime(tmp_path: Path, monkeypatch) -> None:

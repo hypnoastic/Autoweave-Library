@@ -210,14 +210,35 @@ class CeleryWorkflowDispatcher:
             runtime_config=runtime.runtime_config,
         )
 
-    def worker_health(self, *, timeout_seconds: float = 1.0) -> str:
+    def worker_health(self, *, timeout_seconds: float = 2.5) -> str:
         if not celery_execution_enabled(self.runtime_config):
             return "disabled (execution_backend=inline)"
         try:
             inspect = self.app.control.inspect(timeout=timeout_seconds)
-            response = inspect.ping() or {}
+            ping_response = inspect.ping() or {}
+            stats_response = inspect.stats() or {}
+            response = ping_response or stats_response
             if response:
-                return f"ok (workers={len(response)}; queues={', '.join(self.queue_names)})"
+                active_queues = inspect.active_queues() or {}
+                subscribed_workers = 0
+                for worker_name, queues in active_queues.items():
+                    queue_names = {
+                        str(queue.get("name") or "").strip()
+                        for queue in queues
+                        if isinstance(queue, dict)
+                    }
+                    if queue_names & set(self.queue_names):
+                        subscribed_workers += 1
+                if active_queues and subscribed_workers == 0:
+                    return (
+                        f"degraded (workers={len(response)}; subscribed_workers=0; "
+                        f"queues={', '.join(self.queue_names)})"
+                    )
+                probe = "ping" if ping_response else "stats"
+                return (
+                    f"ok (workers={len(response)}; queues={', '.join(self.queue_names)}; "
+                    f"subscribed_workers={subscribed_workers or len(response)}; probe={probe})"
+                )
             return "error (no active celery workers responded)"
         except Exception as exc:
             return f"error ({exc})"

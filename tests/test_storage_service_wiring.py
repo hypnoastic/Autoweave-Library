@@ -247,10 +247,34 @@ def test_sqlite_repository_delete_workflow_run_cleans_memory_and_canonical_rows(
             content="cleanup me",
         )
     )
+    repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="project",
+            scope_id=graph.workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="cleanup project memory",
+            metadata_json={
+                "workflow_run_id": graph.workflow_run.id,
+                "task_id": graph.tasks[0].id,
+            },
+        )
+    )
+    unrelated_memory = repo.save_memory_entry(
+        MemoryEntryRecord(
+            project_id=graph.workflow_run.project_id,
+            scope_type="project",
+            scope_id=graph.workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="keep project memory",
+            metadata_json={"workflow_run_id": "run-other", "task_id": "task-other"},
+        )
+    )
 
     assert repo.delete_workflow_run(graph.workflow_run.id) is True
     assert repo.list_workflow_runs() == []
     assert repo.list_memory_entries("workflow_run", graph.workflow_run.id) == []
+    assert [entry.id for entry in repo.list_memory_entries("project", graph.workflow_run.project_id)] == [unrelated_memory.id]
     if hasattr(bundle.workflow_repository, "close"):
         bundle.workflow_repository.close()
     if hasattr(bundle.graph_projection, "close"):

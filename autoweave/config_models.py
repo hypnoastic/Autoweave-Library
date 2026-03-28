@@ -73,7 +73,9 @@ class RuntimeConfig(BaseConfigModel):
     execution_backend: Literal["inline", "celery"] = "inline"
     celery_queue_names: list[str] = Field(default_factory=list)
     celery_result_expires_seconds: int = 3600
+    celery_worker_pool: str = "auto"
     clarification_retry_limit: int = 2
+    require_release_signoff: bool = True
     default_concurrency: int = 1
     retry_policy: dict[str, object] = Field(default_factory=dict)
     heartbeat_intervals: dict[str, int] = Field(default_factory=dict)

@@ -266,6 +266,7 @@ def render_agent_skill_markdown(role: str, filename: str) -> str:
             "## Do\n"
             "- Verify the acceptance criteria one by one.\n"
             "- Look for regressions, stale assumptions, and missing tests.\n"
+            "- Record the exact commands, previews, or smoke checks you ran and whether they passed.\n"
             "- Record what is still blocked.\n"
             "- Start the final verdict with `REVIEW_DECISION: APPROVE` or `REVIEW_DECISION: REVISE`.\n"
         )
@@ -276,6 +277,7 @@ def render_agent_skill_markdown(role: str, filename: str) -> str:
             "## Do\n"
             "- Confirm artifacts are final and traceable.\n"
             "- Summarize residual risk and unresolved questions.\n"
+            "- Only approve when you can cite concrete runnable validation evidence.\n"
             "- If revision is needed, provide detailed backend, frontend, and integration fixes in one pass.\n"
             "- Assume the workflow will rework once from your notes and will not request a second review pass.\n"
         )
@@ -445,7 +447,9 @@ def render_runtime_files() -> dict[Path, str]:
                 "execution_backend": "celery",
                 "celery_queue_names": ["dispatch"],
                 "celery_result_expires_seconds": 3600,
+                "celery_worker_pool": "auto",
                 "clarification_retry_limit": 2,
+                "require_release_signoff": True,
                 "default_concurrency": 4,
                 "retry_policy": {"max_attempts": 3, "backoff_seconds": 15},
                 "heartbeat_intervals": {"worker": 15, "lease": 60},
