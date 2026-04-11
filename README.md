@@ -56,6 +56,21 @@ At a high level:
 5. If a workflow needs clarification or approval, execution pauses in the runtime until the request is answered.
 6. Monitoring surfaces the current snapshot of runs, tasks, requests, attempts, and artifacts.
 
+## How It Fits With AutoWeave Web
+
+The most important architectural rule in this workspace is:
+
+- `Autoweave Web` owns product UX, product auth, product navigation, inbox/dashboard/orbit surfaces, and repository/member workflows.
+- `Autoweave Library` owns execution semantics, durable workflow state, queueing, artifacts, approval pauses, and monitoring.
+
+That means when you are deciding where a change belongs:
+
+- edit the library when you are changing how workflows compile, execute, pause, resume, persist, emit artifacts, or expose runtime status
+- edit the web product when you are changing product APIs, GitHub auth/install flows, inbox/dashboard/orbit UX, or other product-facing views
+- keep the boundary package-based: the web backend should install and call the library, not import arbitrary source files across repos
+
+In practice, the web product should treat this repo as the control-plane runtime dependency that feeds product surfaces such as inbox summaries, orbit activity, workflow state, and monitoring drill-downs.
+
 ## Repo Layout
 
 The main package surface is:
@@ -183,6 +198,23 @@ autoweave worker --root .
 autoweave cleanup-local-state --root .
 ```
 
+## Operator Loop
+
+If you are working across both repos, the common loop is:
+
+1. Change execution/runtime behavior here in `Autoweave Library`.
+2. Install the updated package into the web/backend environment.
+3. Verify the product still consumes the library through its installed package boundary.
+4. Validate both the library runtime behavior and the web product surfaces that depend on it.
+
+For library-only validation, the fastest checks are usually:
+
+```bash
+./.venv/bin/python -m pytest tests -q
+autoweave doctor --root .
+autoweave ui --root . --host 127.0.0.1 --port 8765
+```
+
 ## Bootstrap and Template Model
 
 This repo ships packaged templates for AutoWeave projects.
@@ -268,6 +300,8 @@ python -m build --sdist
 ```
 
 The packaging boundary matters because downstream consumers, including AutoWeave Web, should use the installed package rather than direct source-tree coupling.
+
+When you change the public runtime contract, treat packaging as part of the feature, not as a release afterthought.
 
 ## Test Coverage
 
