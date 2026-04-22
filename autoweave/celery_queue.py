@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ from autoweave.settings import LocalEnvironmentSettings, find_project_root
 
 DEFAULT_CELERY_QUEUE = "dispatch"
 WORKFLOW_TASK_NAME = "autoweave.dispatch.workflow"
+RECOVERY_METADATA_PATH = Path("var/state/project_scope.json")
 
 
 def _queue_names(runtime_config: RuntimeConfig) -> tuple[str, ...]:
@@ -49,6 +51,61 @@ def _project_root_from_env() -> Path | None:
     if not value:
         return None
     return Path(value).expanduser().resolve()
+
+
+def recovery_metadata_file(root: Path) -> Path:
+    return root / RECOVERY_METADATA_PATH
+
+
+def write_recovery_metadata(*, root: Path, project_id: str) -> Path:
+    path = recovery_metadata_file(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"project_id": project_id}, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def load_recovery_project_id(*, root: Path) -> str | None:
+    path = recovery_metadata_file(root)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    project_id = str(payload.get("project_id") or "").strip()
+    return project_id or None
+
+
+def recovery_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    resolved = {key: value for key, value in os.environ.items() if value is not None}
+    if environ is not None:
+        resolved.update({key: value for key, value in environ.items() if value is not None})
+
+    runtime_overrides = {
+        "POSTGRES_URL": "RUNTIME_POSTGRES_URL",
+        "REDIS_URL": "RUNTIME_REDIS_URL",
+        "NEO4J_URL": "RUNTIME_NEO4J_URL",
+        "NEO4J_USERNAME": "RUNTIME_NEO4J_USERNAME",
+        "NEO4J_PASSWORD": "RUNTIME_NEO4J_PASSWORD",
+        "ARTIFACT_STORE_URL": "RUNTIME_ARTIFACT_STORE_URL",
+        "VERTEXAI_PROJECT": "RUNTIME_VERTEX_PROJECT",
+        "VERTEXAI_LOCATION": "RUNTIME_VERTEX_LOCATION",
+        "VERTEXAI_SERVICE_ACCOUNT_FILE": "RUNTIME_VERTEX_SERVICE_ACCOUNT_FILE",
+        "GOOGLE_APPLICATION_CREDENTIALS": "RUNTIME_VERTEX_SERVICE_ACCOUNT_FILE",
+        "OPENHANDS_AGENT_SERVER_BASE_URL": "RUNTIME_OPENHANDS_BASE_URL",
+        "OPENHANDS_AGENT_SERVER_API_KEY": "RUNTIME_OPENHANDS_API_KEY",
+        "AUTOWEAVE_POSTGRES_SCHEMA": "RUNTIME_POSTGRES_SCHEMA",
+        "AUTOWEAVE_OPENHANDS_POLL_TIMEOUT_SECONDS": "RUNTIME_AUTOWEAVE_OPENHANDS_POLL_TIMEOUT_SECONDS",
+    }
+    for target_key, source_key in runtime_overrides.items():
+        if source_key in resolved:
+            resolved[target_key] = str(resolved.get(source_key) or "")
+
+    if "RUNTIME_POSTGRES_URL" in resolved or not str(resolved.get("AUTOWEAVE_CANONICAL_BACKEND") or "").strip():
+        resolved["AUTOWEAVE_CANONICAL_BACKEND"] = "postgres" if str(resolved.get("POSTGRES_URL") or "").strip() else "sqlite"
+    if "RUNTIME_NEO4J_URL" in resolved or not str(resolved.get("AUTOWEAVE_GRAPH_BACKEND") or "").strip():
+        resolved["AUTOWEAVE_GRAPH_BACKEND"] = "neo4j" if str(resolved.get("NEO4J_URL") or "").strip() else "sqlite"
+    return resolved
 
 
 def load_runtime_bundle(
@@ -90,6 +147,12 @@ def create_autoweave_celery_app(
             WORKFLOW_TASK_NAME: {"queue": queues[0]},
         },
         task_track_started=True,
+        # Keep long-running workflow dispatches on the broker until the worker
+        # actually finishes them so a worker restart can redeliver the task and
+        # let LocalRuntime recover the persisted run/attempt state.
+        task_acks_late=True,
+        task_acks_on_failure_or_timeout=False,
+        task_reject_on_worker_lost=True,
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
@@ -249,9 +312,10 @@ class CeleryWorkflowDispatcher:
         request: str,
         dispatch: bool,
         max_steps: int,
+        project_id: str | None = None,
     ) -> CeleryWorkflowDispatchReceipt:
-        with build_local_runtime(root=self.root, environ=self.environ) as runtime:
-            workflow_run_id = runtime.initialize_workflow_run(request=request)
+        with build_local_runtime(root=self.root, environ=self.environ, project_id=project_id) as runtime:
+            workflow_run_id = runtime.initialize_workflow_run(request=request, project_id=project_id)
         return self.enqueue_workflow_action(
             action="continue_workflow",
             workflow_run_id=workflow_run_id,
@@ -316,6 +380,57 @@ class CeleryWorkflowDispatcher:
             report_payload=report_payload,
             error=error,
         )
+
+
+def recover_workflows(
+    *,
+    root: Path,
+    environ: Mapping[str, str] | None = None,
+    project_id: str | None = None,
+    dispatch: bool = True,
+    max_steps: int = 8,
+) -> tuple[CeleryWorkflowDispatchReceipt, ...]:
+    resolved_environ = recovery_environ(environ)
+    resolved_project_id = str(project_id or load_recovery_project_id(root=root) or "").strip()
+    if not resolved_project_id:
+        return ()
+
+    dispatcher = CeleryWorkflowDispatcher(root=root, environ=resolved_environ)
+    recovered: list[CeleryWorkflowDispatchReceipt] = []
+    with build_local_runtime(root=root, environ=resolved_environ, project_id=resolved_project_id) as runtime:
+        repository = runtime.storage.workflow_repository
+        for workflow_run in repository.list_workflow_runs():
+            if workflow_run.project_id != resolved_project_id:
+                continue
+            if workflow_run.status in {"completed", "failed", "cancelled"}:
+                continue
+            open_human_requests = [
+                item
+                for item in repository.list_human_requests_for_run(workflow_run.id)
+                if str(item.status.value) == "open"
+            ]
+            if open_human_requests:
+                continue
+            open_approval_requests = [
+                item
+                for item in repository.list_approval_requests_for_run(workflow_run.id)
+                if str(item.status.value) == "requested"
+            ]
+            if open_approval_requests:
+                continue
+            request_text = str(workflow_run.root_input_json.get("user_request") or "").strip()
+            if not request_text:
+                continue
+            recovered.append(
+                dispatcher.enqueue_workflow_action(
+                    action="continue_workflow",
+                    workflow_run_id=workflow_run.id,
+                    request=request_text,
+                    dispatch=dispatch,
+                    max_steps=max_steps,
+                )
+            )
+    return tuple(recovered)
 
 
 if Celery is None:
