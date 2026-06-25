@@ -247,6 +247,7 @@ class LocalRuntime:
     worker_adapter: OpenHandsRemoteWorkerAdapter
     openhands_client: OpenHandsAgentServerClient
     orchestration: OrchestrationService
+    project_id: str
     _last_persisted_graph_signature: tuple[str, int, tuple[str, ...], tuple[str, ...]] | None = field(
         default=None,
         init=False,
@@ -267,6 +268,7 @@ class LocalRuntime:
         transport: Any | None = None,
         bootstrap_path: str = "/api/conversations",
         workflow_run_id: str | None = None,
+        project_id: str | None = None,
     ) -> "LocalRuntime":
         settings = LocalEnvironmentSettings.load(root=root, environ=environ)
         settings.ensure_local_layout()
@@ -282,9 +284,10 @@ class LocalRuntime:
             for role in workflow_definition.roles
         }
 
+        resolved_project_id = str(project_id or settings.project_root.name or "local").strip() or "local"
         workflow_graph = build_workflow_graph(
             workflow_definition,
-            project_id="local",
+            project_id=resolved_project_id,
             team_id="local",
             workflow_definition_id=f"{workflow_definition.name}:{workflow_definition.version}",
             workflow_run_id=workflow_run_id,
@@ -334,10 +337,13 @@ class LocalRuntime:
             worker_adapter=worker_adapter,
             openhands_client=openhands_client,
             orchestration=orchestration,
+            project_id=resolved_project_id,
         )
-        runtime._last_persisted_graph_signature = (
-            runtime._graph_structure_signature() if loaded_from_repository else None
-        )
+        if loaded_from_repository:
+            runtime.load_workflow_run(canonical_graph.workflow_run.id)
+        else:
+            runtime._reconcile_stale_attempts_on_load()
+            runtime._last_persisted_graph_signature = None
         return runtime
 
     def close(self) -> None:
@@ -348,6 +354,35 @@ class LocalRuntime:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+    def _reconcile_stale_attempts_on_load(self) -> None:
+        recovered = False
+        for attempt_id in tuple(self.orchestration.state.attempts_by_id):
+            attempt = self.orchestration.state.attempt(attempt_id)
+            if attempt.state not in {AttemptState.DISPATCHING, AttemptState.RUNNING}:
+                continue
+            lease_key = attempt.lease_key or self.storage.redis_wire.lease_key(attempt.id)
+            if self.storage.lease_manager.get(lease_key) is not None:
+                continue
+            task = self.orchestration.state.task(attempt.task_id)
+            with self._runtime_lock:
+                recovered_task, recovered_attempt = self.orchestration.recover_attempt(
+                    task.id,
+                    attempt.id,
+                    reason="lease_missing_on_runtime_load",
+                )
+                recovered_task = self.orchestration.unblock_task(recovered_task.id)
+                self._sync_canonical_state()
+            self._publish_lifecycle_event(
+                task=recovered_task,
+                attempt=recovered_attempt,
+                event_type="attempt.recovered_on_runtime_load",
+                source="redis",
+                payload_json={"lease_key": lease_key, "reason": "lease_missing_on_runtime_load"},
+            )
+            recovered = True
+        if recovered:
+            self._last_persisted_graph_signature = self._graph_structure_signature()
 
     @property
     def runtime_policy(self) -> dict[str, Any]:
@@ -375,6 +410,7 @@ class LocalRuntime:
             state.approval_requests[request.id] = request.model_copy(deep=True)
         self.orchestration = OrchestrationService(state)
         self._last_persisted_graph_signature = self._graph_structure_signature()
+        self._reconcile_stale_attempts_on_load()
 
     def _workflow_request(self) -> str:
         with self._runtime_lock:
@@ -730,7 +766,7 @@ class LocalRuntime:
         return configured_limit
 
     def _worker_workspace_path(self, attempt_id: str) -> str:
-        return str(Path("/workspace") / "workspaces" / attempt_id)
+        return str(self.worker_adapter.workspace_policy.workspace_path_for_attempt(attempt_id))
 
     def _graph_structure_signature(self) -> tuple[str, int, tuple[str, ...], tuple[str, ...]]:
         with self._runtime_lock:
@@ -763,7 +799,7 @@ class LocalRuntime:
         workflow_definition_id = f"{self.workflow_definition.name}:{self.workflow_definition.version}"
         fresh_graph = build_workflow_graph(
             self.workflow_definition,
-            project_id="local",
+            project_id=self.project_id,
             team_id="local",
             workflow_definition_id=workflow_definition_id,
             workflow_run_id=workflow_run_id or f"{workflow_definition_id.replace(':', '_')}_run_{generate_id('demo')}",
@@ -779,7 +815,12 @@ class LocalRuntime:
         *,
         request: str,
         workflow_run_id: str | None = None,
+        project_id: str | None = None,
     ) -> str:
+        if project_id is not None:
+            normalized_project_id = str(project_id).strip()
+            if normalized_project_id:
+                self.project_id = normalized_project_id
         self._reset_workflow_run(
             workflow_run_id=workflow_run_id,
             root_input_json={"user_request": request},
@@ -1212,6 +1253,11 @@ class LocalRuntime:
             return "revise"
         explicit_approve = "review_decision: approve" in lower_feedback
         approve_cues = (
+            "approved",
+            "approve",
+            "looks good",
+            "meets all the requirements",
+            "meets the requirements",
             "no blocking issues",
             "ready to ship",
             "recommendation: approve",
@@ -2853,6 +2899,7 @@ def build_local_runtime(
     transport: Any | None = None,
     bootstrap_path: str = "/api/conversations",
     workflow_run_id: str | None = None,
+    project_id: str | None = None,
 ) -> LocalRuntime:
     return LocalRuntime.build(
         root=root,
@@ -2860,4 +2907,5 @@ def build_local_runtime(
         transport=transport,
         bootstrap_path=bootstrap_path,
         workflow_run_id=workflow_run_id,
+        project_id=project_id,
     )

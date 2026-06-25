@@ -173,6 +173,29 @@ def test_workspace_policy_isolated_and_resume_stable(tmp_path: Path) -> None:
     assert reservation.resumed_from_attempt_id == "attempt_1"
 
 
+def test_workspace_policy_seeds_attempt_from_project_clone(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(parents=True)
+    (project_dir / "README.md").write_text("# orbit\n", encoding="utf-8")
+    (project_dir / ".git").mkdir()
+    policy = WorkspacePolicy(root_dir=tmp_path / "workspaces")
+
+    reservation = policy.reserve(attempt_id="attempt_1")
+
+    assert (reservation.workspace_path / "README.md").read_text(encoding="utf-8") == "# orbit\n"
+    assert (reservation.workspace_path / ".git").exists()
+
+
+def test_workspace_policy_defaults_to_openhands_container_owner(monkeypatch) -> None:
+    monkeypatch.delenv("AUTOWEAVE_WORKSPACE_UID", raising=False)
+    monkeypatch.delenv("AUTOWEAVE_WORKSPACE_GID", raising=False)
+    monkeypatch.delenv("OPENHANDS_CONTAINER_UID", raising=False)
+    monkeypatch.delenv("OPENHANDS_RUN_AS_UID", raising=False)
+    monkeypatch.delenv("SANDBOX_USER_ID", raising=False)
+
+    assert WorkspacePolicy._workspace_owner() == (10001, 10001)
+
+
 def test_config_loader_reads_yaml_model(tmp_path: Path) -> None:
     yaml_path = tmp_path / "vertex.yaml"
     yaml_path.write_text(
