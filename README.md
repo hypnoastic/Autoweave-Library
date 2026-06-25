@@ -82,23 +82,17 @@ workflow_run = runtime.launch_workflow(
 print(f"Started run: {workflow_run.id}")
 ```
 
-## Quality & Security
+## Quality & Testing
 
-This library is designed with production-readiness in mind.
+This library is designed with production-readiness in mind and enforces strict quality metrics:
 
 * **Automated CI**: Validates linting (Ruff), typechecking (Mypy), tests (Pytest), and builds `.whl` packages. A package smoke test is run to ensure publishable states.
-* **Test Suite**: Covers core logic, integration flows, UI/docs behavior, and edge cases with a strict 80%+ overall coverage target.
-* **Security Checks**: Automated workflows check dependencies via `pip-audit`, run CodeQL static analysis, and execute secret scanning.
-* **Release Process**: Package release is designed for safe publishing to PyPI using Trusted Publishing (OIDC), preventing the need for long-lived repository secrets.
-* **Architecture Constraints**: No backend/API surface, auth, or product databases are added because this project is purely an execution library.
+* **Coverage Targets**: Enforces a strict minimum of **80% overall line coverage**. CI workflows will fail if coverage drops below this threshold.
+* **Test Suite Details**: Validates core logic (Unit Tests), end-to-end orchestration and DAG routing (Integration Tests), and interactive dashboard behaviors (UI Tests with Playwright).
+* **Security Checks**: Automated workflows continuously audit dependencies via `pip-audit`, execute `CodeQL` static analysis, and perform secret scanning.
+* **Package Validation**: Every build runs a `smoke_test.sh` script to confirm the `.whl` can be installed in a clean environment and imported natively.
 
-## Testing
-
-Run the test suite locally:
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-```
+See [TESTING.md](TESTING.md) for the full testing philosophy and metric matrix.
 
 ## Contributing
 1. Fork the repo.
