@@ -33,6 +33,10 @@ def get_requires_for_build_wheel(config_settings=None):  # noqa: D401, ANN001
     return []
 
 
+def get_requires_for_build_editable(config_settings=None):  # noqa: D401, ANN001
+    return []
+
+
 def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):  # noqa: D401, ANN001
     metadata_dir = Path(metadata_directory) / DIST_INFO
     metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -43,6 +47,24 @@ def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None): 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):  # noqa: D401, ANN001
     wheel_path = Path(wheel_directory) / WHEEL_NAME
     files = _collect_wheel_files()
+
+    record_lines: list[str] = []
+    with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for wheel_file in files:
+            archive.writestr(wheel_file.arcname, wheel_file.data)
+            digest = base64.urlsafe_b64encode(hashlib.sha256(wheel_file.data).digest()).decode("ascii").rstrip("=")
+            record_lines.append(f"{wheel_file.arcname},sha256={digest},{len(wheel_file.data)}")
+
+        record_name = f"{DIST_INFO}/RECORD"
+        record_data = ("\n".join(record_lines + [f"{record_name},,"]) + "\n").encode("utf-8")
+        archive.writestr(record_name, record_data)
+
+    return wheel_path.name
+
+
+def build_editable(wheel_directory, config_settings=None, metadata_directory=None):  # noqa: D401, ANN001
+    wheel_path = Path(wheel_directory) / WHEEL_NAME
+    files = _collect_editable_wheel_files()
 
     record_lines: list[str] = []
     with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -87,6 +109,38 @@ def _collect_wheel_files() -> list[WheelFile]:
         for path in sorted(root.rglob("*.py")):
             files.append(WheelFile(arcname=str(path.relative_to(ROOT)), data=path.read_bytes()))
 
+    files.extend(
+        [
+            WheelFile(
+                arcname=f"{DIST_INFO}/METADATA",
+                data=_metadata_content().encode("utf-8"),
+            ),
+            WheelFile(
+                arcname=f"{DIST_INFO}/WHEEL",
+                data=(
+                    "Wheel-Version: 1.0\n"
+                    "Generator: build_backend\n"
+                    "Root-Is-Purelib: true\n"
+                    "Tag: py3-none-any\n"
+                ).encode("utf-8"),
+            ),
+            WheelFile(
+                arcname=f"{DIST_INFO}/entry_points.txt",
+                data=b"[console_scripts]\nautoweave = apps.cli.main:main\n",
+            ),
+        ]
+    )
+    return files
+
+
+def _collect_editable_wheel_files() -> list[WheelFile]:
+    files: list[WheelFile] = []
+    files.append(
+        WheelFile(
+            arcname=f"{NAME.replace('-', '_')}.pth",
+            data=(str(ROOT) + "\n").encode("utf-8"),
+        )
+    )
     files.extend(
         [
             WheelFile(

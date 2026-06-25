@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -760,6 +762,39 @@ class WorkspacePolicy:
     isolate_per_attempt: bool = True
     reuse_on_resume: bool = True
 
+    @staticmethod
+    def _workspace_owner() -> tuple[int, int]:
+        # OpenHands agent-server executes git/file operations as the container user
+        # (`openhands`, uid 10001 in the stock image), while SANDBOX_USER_ID refers
+        # to the inner sandbox user. Git safe-directory checks need the on-disk
+        # ownership to match the process performing the repo operations.
+        raw_uid = (
+            os.environ.get("AUTOWEAVE_WORKSPACE_UID")
+            or os.environ.get("OPENHANDS_CONTAINER_UID")
+            or os.environ.get("OPENHANDS_RUN_AS_UID")
+            or "10001"
+        )
+        raw_gid = os.environ.get("AUTOWEAVE_WORKSPACE_GID") or raw_uid
+        try:
+            return max(0, int(raw_uid)), max(0, int(raw_gid))
+        except ValueError:
+            return 10001, 10001
+
+    @classmethod
+    def _normalize_workspace_ownership(cls, workspace_path: Path) -> None:
+        uid, gid = cls._workspace_owner()
+        try:
+            os.chown(workspace_path, uid, gid)
+            for current_root, dir_names, file_names in os.walk(workspace_path):
+                current_path = Path(current_root)
+                os.chown(current_path, uid, gid)
+                for name in dir_names:
+                    os.chown(current_path / name, uid, gid)
+                for name in file_names:
+                    os.chown(current_path / name, uid, gid)
+        except PermissionError:
+            return
+
     def workspace_path_for_attempt(self, attempt_id: str) -> Path:
         safe_attempt_id = attempt_id.replace("/", "_")
         if self.isolate_per_attempt:
@@ -769,6 +804,10 @@ class WorkspacePolicy:
     def reserve(self, *, attempt_id: str, resumed_from_attempt_id: str | None = None) -> WorkspaceReservation:
         workspace_path = self.workspace_path_for_attempt(attempt_id)
         workspace_path.mkdir(parents=True, exist_ok=True)
+        seed_path = self.root_dir.parent / "project"
+        if seed_path.exists() and not any(workspace_path.iterdir()):
+            shutil.copytree(seed_path, workspace_path, dirs_exist_ok=True)
+        self._normalize_workspace_ownership(workspace_path)
         return WorkspaceReservation(
             attempt_id=attempt_id,
             workspace_path=workspace_path,

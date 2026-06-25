@@ -18,6 +18,12 @@ from autoweave.settings import LocalEnvironmentSettings
 
 app = typer.Typer(help="AutoWeave terminal control plane.")
 
+PRESETS = {
+    "demo": "Review the backend contract and propose the next steps",
+    "debug": "Perform a simple quick workflow ping.",
+    "comprehensive": "Perform a comprehensive repository analysis and summarize all endpoints.",
+}
+
 
 def _echo_validation_result(root_path: Path, result: ValidationResult) -> None:
     typer.echo("validation=ok" if result.ok else "validation=failed")
@@ -170,12 +176,23 @@ def run_example(
 @app.command("run-workflow")
 def run_workflow(
     root: Path | None = typer.Option(None, "--root", help="Repository root to inspect"),
-    request: str = typer.Option(..., "--request", help="User request to seed into the workflow entrypoint"),
+    request: str | None = typer.Option(None, "--request", help="User request to seed into the workflow entrypoint"),
+    preset: str | None = typer.Option(None, "--preset", help="Workflow preset to dispatch"),
     dispatch: bool = typer.Option(False, "--dispatch/--dry-run", help="Dispatch runnable tasks to OpenHands"),
     queue: bool = typer.Option(False, "--queue", help="Enqueue workflow execution onto Celery instead of running inline"),
     max_steps: int = typer.Option(8, "--max-steps", min=1, help="Maximum runnable tasks to advance in one invocation"),
 ) -> None:
     """Run the current workflow from a user request instead of the fixed sample brief."""
+    if not request and not preset:
+        typer.echo("Error: must provide either --request or --preset")
+        raise typer.Exit(code=1)
+    if preset:
+        if preset not in PRESETS:
+            typer.echo(f"Unknown preset: {preset}. Available: {', '.join(PRESETS.keys())}")
+            raise typer.Exit(code=1)
+        request = PRESETS[preset]
+
+    assert request is not None
     root_path = repository_root(root)
     repo_result = validate_repository(root_path)
     _echo_validation_result(root_path, repo_result)
@@ -257,6 +274,70 @@ def ui(
     if not repo_result.ok:
         raise typer.Exit(code=1)
     serve_dashboard(root=root_path, host=host, port=port)
+
+
+@app.command("start")
+def start(
+    root: Path | None = typer.Option(None, "--root", help="Project root"),
+    preset: str | None = typer.Option(None, "--preset", help="Workflow preset to dispatch on startup"),
+    request: str | None = typer.Option(None, "--request", help="Specific request to dispatch on startup"),
+    port: int = typer.Option(8765, "--port", help="Port for the UI"),
+) -> None:
+    """Start the entire local execution environment: UI and Celery worker."""
+    import time
+    root_path = repository_root(root)
+    
+    # Validation
+    repo_result = validate_repository(root_path)
+    if not repo_result.ok:
+        _echo_validation_result(root_path, repo_result)
+        raise typer.Exit(code=1)
+
+    typer.echo("Starting AutoWeave UI and Celery Worker...")
+    
+    ui_proc = subprocess.Popen(
+        [sys.executable, "-m", "apps.cli.main", "ui", "--root", str(root_path), "--port", str(port)],
+        cwd=root_path,
+    )
+    
+    worker_proc = subprocess.Popen(
+        [sys.executable, "-m", "apps.cli.main", "worker", "--root", str(root_path)],
+        cwd=root_path,
+    )
+
+    typer.echo(f"UI running on port {port} (pid {ui_proc.pid})")
+    typer.echo(f"Worker running (pid {worker_proc.pid})")
+
+    if request or preset:
+        prompt = request
+        if preset:
+            if preset not in PRESETS:
+                typer.echo(f"Unknown preset: {preset}. Available: {', '.join(PRESETS.keys())}")
+                ui_proc.kill()
+                worker_proc.kill()
+                raise typer.Exit(code=1)
+            prompt = PRESETS[preset]
+        
+        typer.echo(f"Waiting for worker to initialize before dispatching request: '{prompt}'...")
+        time.sleep(3) # Wait for Celery worker to be ready
+        
+        try:
+            dispatcher = CeleryWorkflowDispatcher(root=root_path)
+            receipt = dispatcher.enqueue_new_workflow(request=prompt, dispatch=True, max_steps=8)
+            for line in receipt.summary_lines():
+                typer.echo(line)
+        except Exception as e:
+            typer.echo(f"Failed to dispatch: {e}")
+
+    try:
+        ui_proc.wait()
+        worker_proc.wait()
+    except KeyboardInterrupt:
+        typer.echo("Shutting down...")
+        ui_proc.terminate()
+        worker_proc.terminate()
+        ui_proc.wait()
+        worker_proc.wait()
 
 
 @app.command("cleanup-local-state")

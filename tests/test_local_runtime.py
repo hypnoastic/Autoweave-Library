@@ -16,7 +16,7 @@ from autoweave.artifacts.registry import InMemoryArtifactRegistry
 from autoweave.context.service import InMemoryContextService
 from autoweave.graph.projection import SQLiteGraphProjectionBackend
 from autoweave.memory.store import InMemoryMemoryStore
-from autoweave.models import MemoryEntryRecord, MemoryLayer
+from autoweave.models import AttemptState, MemoryEntryRecord, MemoryLayer
 from autoweave.settings import CANONICAL_VERTEX_CREDENTIALS, LocalEnvironmentSettings
 from autoweave.storage.coordination import RedisClient, RedisIdempotencyStore, RedisLeaseManager
 from autoweave.storage.durable import SQLiteWorkflowRepository
@@ -530,7 +530,7 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
     assert example.openhands_health.ok is True
     assert example.launch_payload["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(normalized_credentials)
     assert example.launch_payload["runtime_policy"]["reasoning_effort"] == "none"
-    assert example.launch_payload["workspace_path"] == f"/workspace/workspaces/{example.launch_payload['task_attempt_id']}"
+    assert example.launch_payload["workspace_path"] == str(tmp_path / "workspaces" / example.launch_payload["task_attempt_id"])
     assert example.task_state == "completed"
     assert example.attempt_state == "succeeded"
     assert example.workflow_status == "running"
@@ -1387,6 +1387,29 @@ def test_local_runtime_review_requires_validation_evidence_for_approval(tmp_path
     assert decision == "revise"
 
 
+def test_local_runtime_review_accepts_plain_approval_language_with_validation_evidence(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    calls: list[dict[str, object]] = []
+    transport = _recording_transport(calls)
+
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
+        runtime.run_workflow(
+            request="Build a booking app.",
+            dispatch=False,
+            max_steps=1,
+        )
+        review_task = runtime.orchestration.state.task("review")
+
+        decision = runtime._review_decision(
+            review_task,
+            "The delivery is approved. Validated in browser, build passed, and API smoke test passed.",
+        )
+
+    assert decision == "approve"
+
+
 def test_local_runtime_requires_release_signoff_after_single_review_pass(tmp_path: Path, monkeypatch) -> None:
     _prepare_local_root(tmp_path)
     calls: list[dict[str, object]] = []
@@ -1486,6 +1509,33 @@ def test_local_runtime_purge_workflow_runs_clears_project_memory_store_entries(t
 
         assert cleanup.purged_run_ids == (report.workflow_run_id,)
         assert runtime.storage.context_service.list_memory_entries("project", workflow_run.project_id) == []
+
+
+def test_local_runtime_uses_supplied_project_scope_for_memory_isolation(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-a") as runtime:
+        workflow_run_id = runtime.initialize_workflow_run(request="scope a", project_id="orbit-a")
+        workflow_run = runtime.storage.workflow_repository.get_workflow_run(workflow_run_id)
+        entry = MemoryEntryRecord(
+            project_id=workflow_run.project_id,
+            scope_type="project",
+            scope_id=workflow_run.project_id,
+            memory_layer=MemoryLayer.SEMANTIC,
+            content="orbit a memory",
+            metadata_json={"kind": "test"},
+        )
+        runtime.storage.workflow_repository.save_memory_entry(entry)
+        runtime.storage.memory_store.write(entry)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-b") as runtime:
+        workflow_run_id = runtime.initialize_workflow_run(request="scope b", project_id="orbit-b")
+        workflow_run = runtime.storage.workflow_repository.get_workflow_run(workflow_run_id)
+
+        assert workflow_run.project_id == "orbit-b"
+        assert runtime.storage.context_service.list_memory_entries("project", "orbit-b") == []
+        assert [entry.content for entry in runtime.storage.context_service.list_memory_entries("project", "orbit-a")] == ["orbit a memory"]
 
 
 def test_cli_doctor_and_run_example_use_composed_runtime(tmp_path: Path, monkeypatch) -> None:
@@ -1820,6 +1870,41 @@ def test_local_runtime_reuses_existing_canonical_graph_on_restart(tmp_path: Path
         second_run_id = second_runtime.orchestration.state.graph.workflow_run.id
 
     assert first_run_id == second_run_id == "team_1.0_run"
+
+
+def test_local_runtime_recovers_running_attempt_without_active_lease_on_restart(tmp_path: Path, monkeypatch) -> None:
+    _prepare_local_root(tmp_path)
+    monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
+
+    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([])) as runtime:
+        workflow_run_id = runtime.initialize_workflow_run(request="Recover stale lease", project_id="orbit-recovery")
+        runtime.orchestration.schedule()
+        manager_task = next(
+            task for task in runtime.orchestration.state.graph.tasks if task.task_key == "manager_plan"
+        )
+        attempt = runtime.orchestration.open_attempt(
+            task_id=manager_task.id,
+            agent_definition_id="manager-agent",
+            workspace_id="sandbox-stale",
+            compiled_worker_config_json={"model_name": "gemini-3-flash-preview"},
+            lease_key=f"lease:{manager_task.id}",
+        )
+        runtime.orchestration.start_task(manager_task.id)
+        runtime.orchestration.dispatch_attempt(attempt.id)
+        runtime.orchestration.start_attempt(attempt.id)
+        runtime._sync_canonical_state()
+
+    with build_local_runtime(
+        root=tmp_path,
+        environ={},
+        transport=_recording_transport([]),
+        workflow_run_id=workflow_run_id,
+    ) as recovered_runtime:
+        recovered_attempt = recovered_runtime.orchestration.state.attempt(attempt.id)
+        recovered_task = recovered_runtime.orchestration.state.task(manager_task.id)
+
+    assert recovered_attempt.state == AttemptState.ORPHANED
+    assert recovered_task.state.value == "ready"
 
 
 def test_local_runtime_build_does_not_seed_canonical_run_without_execution(tmp_path: Path, monkeypatch) -> None:
