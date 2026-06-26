@@ -175,6 +175,9 @@ class MonitoringService:
         self._snapshot_cache: dict[tuple[int, bool], dict[str, Any]] = {}
         self._snapshot_refreshing: set[tuple[int, bool]] = set()
 
+        # Eagerly pre-warm the snapshot cache on startup to minimize perceived latency on first load
+        self._ensure_snapshot_refresh(limit=5, include_jobs=True)
+
     def _runtime(self, *, workflow_run_id: str | None = None):
         kwargs: dict[str, Any] = {
             "root": self.root,
