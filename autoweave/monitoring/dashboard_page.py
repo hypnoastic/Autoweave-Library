@@ -878,12 +878,16 @@ def render_dashboard_page() -> str:
                 <div class="docs-sidebar">
                     <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px;">Documentation</div>
                     <input type="text" id="docs-search" placeholder="Search docs..." />
-                    <div class="nav-group" style="padding-top: 8px;" id="docs-nav-group">
+                                        <div class="nav-group" style="padding-top: 8px;" id="docs-nav-group">
                         <a class="nav-item active" data-doc="ARCHITECTURE">Architecture</a>
                         <a class="nav-item" data-doc="DEPLOYMENT">Deployment</a>
                         <a class="nav-item" data-doc="autoweave_diagrams_source">Diagrams Source</a>
                         <a class="nav-item" data-doc="autoweave_high_level_architecture">High Level Architecture</a>
                         <a class="nav-item" data-doc="autoweave_implementation_spec">Implementation Spec</a>
+                        <div style="font-weight: 600; font-size: 14px; margin: 16px 0 8px 0; color: var(--text-secondary);">Help & Guides</div>
+                        <a class="nav-item" data-doc="help_cli_reference">Cli Reference</a>
+                        <a class="nav-item" data-doc="help_quick_start">Quick Start</a>
+                        <a class="nav-item" data-doc="help_troubleshooting">Troubleshooting</a>
                     </div>
                 </div>
                 <div class="docs-content">
@@ -1054,8 +1058,7 @@ def render_dashboard_page() -> str:
 
         /* --- Content Store --- */
         const docs = {
-            'ARCHITECTURE': `
-# AutoWeave High-Level Architecture
+            'ARCHITECTURE': `# AutoWeave High-Level Architecture
 
 Version: 2.0  
 Status: frozen architecture baseline  
@@ -1183,10 +1186,8 @@ flowchart LR
     G -->|miss| R[Redis]
     R -->|miss| M[Typed miss / escalate]
 \`\`\`
-
-            `,
-            'DEPLOYMENT': `
-# Deployment Guide
+`,
+            'DEPLOYMENT': `# Deployment Guide
 
 AutoWeave Library is designed to be embedded into applications, but it requires several backing services to operate reliably in a production or local development environment.
 
@@ -1236,10 +1237,8 @@ Task attempts are queued via Celery. To increase throughput:
 ### 5. Secrets Management
 - Do not hardcode credentials in \`.env\` files for production.
 - Inject \`VERTEXAI_SERVICE_ACCOUNT_FILE\`, \`POSTGRES_URL\`, and other secrets via a secrets manager (e.g., HashiCorp Vault, AWS Secrets Manager, Kubernetes Secrets).
-
-            `,
-            'autoweave_diagrams_source': `
-# AutoWeave Diagrams Source
+`,
+            'autoweave_diagrams_source': `# AutoWeave Diagrams Source
 
 Version: 2.0
 Purpose: text-first diagrams for coding agents and PDF generation.
@@ -1486,10 +1485,8 @@ sequenceDiagram
     O->>DB: finalize attempt state
     O->>RD: release lease
 \`\`\`
-
-            `,
-            'autoweave_high_level_architecture': `
-# AutoWeave High-Level Architecture
+`,
+            'autoweave_high_level_architecture': `# AutoWeave High-Level Architecture
 
 Version: 2.0  
 Status: frozen architecture baseline  
@@ -2177,10 +2174,8 @@ flowchart LR
 ## 17. Final architecture conclusion
 
 AutoWeave should be implemented as a **Vertex-AI-backed multi-agent control plane** on top of **OpenHands remote workers**, with **Postgres as truth**, **Redis/Celery as coordination**, **Neo4j as graph retrieval/projection**, **isolated worktrees per attempt**, **dynamic DAG scheduling**, and **normalized observability export** for the main product.
-
-            `,
-            'autoweave_implementation_spec': `
-# AutoWeave Implementation Specification
+`,
+            'autoweave_implementation_spec': `# AutoWeave Implementation Specification
 
 Version: 2.0  
 Status: implementation baseline  
@@ -3329,8 +3324,80 @@ classDiagram
 ## 20. Final implementation conclusion
 
 Build AutoWeave as a **Vertex-AI-backed, OpenHands-powered multi-agent orchestration library** with **canonical Postgres truth**, **Redis coordination**, **Neo4j graph projection/retrieval**, **worker-isolated worktrees**, **typed context and artifact services**, and **library-owned observability export**.
+`,
+            'help_cli_reference': `# CLI Reference
 
-            `
+The AutoWeave CLI is the primary way to interact with the orchestration engine locally. You can access it by running \`autoweave\` or \`uv run autoweave\`.
+
+## Commands
+
+- \`autoweave status\`: Show a minimal repository status summary.
+- \`autoweave validate\`: Validate docs, configs, and sample agent fixtures.
+- \`autoweave bootstrap\`: Create missing sample agents and config fixtures.
+- \`autoweave migrate-project\`: Refresh packaged AutoWeave project-managed files to the latest library templates.
+- \`autoweave create-agent\`: Create a new agent bundle with soul, playbook, config, and skills.
+- \`autoweave doctor\`: Inspect local env, configs, and the OpenHands bootstrap path.
+- \`autoweave run-example\`: Run the notifications example against the composed local runtime.
+- \`autoweave run-workflow\`: Run the current workflow from a user request instead of the fixed sample brief.
+- \`autoweave worker\`: Run a real Celery worker for queued AutoWeave workflow execution.
+- \`autoweave ui\`: Launch the lightweight local monitoring UI.
+- \`autoweave start\`: Start the entire local execution environment: UI and Celery worker.
+- \`autoweave cleanup-local-state\`: Purge stale canonical runs and local generated runtime residue.
+- \`autoweave new-project\`: Initialize a new AutoWeave project.
+`,
+            'help_quick_start': `# Quick Start
+
+Welcome to AutoWeave! This guide will help you get your first agent workflow running locally.
+
+## 1. Initialization
+First, initialize a new AutoWeave project in a fresh directory:
+\`\`\`bash
+autoweave new-project
+\`\`\`
+
+## 2. Bootstrapping
+Create the required agent configurations and bootstrap the local environment:
+\`\`\`bash
+autoweave bootstrap
+\`\`\`
+
+## 3. Starting the Control Plane
+Start the AutoWeave UI and Celery worker using the \`start\` command. This will spin up the local dashboard on \`http://127.0.0.1:8766\`:
+\`\`\`bash
+autoweave start
+\`\`\`
+
+## 4. Running a Workflow
+To execute a workflow, you can either trigger a pre-configured example or run a custom workflow:
+\`\`\`bash
+autoweave run-example
+\`\`\`
+`,
+            'help_troubleshooting': `# Troubleshooting
+
+Common issues and their resolutions when operating AutoWeave.
+
+## Database Locks (SQLite)
+If you see "database is locked" errors, it usually means the Celery worker and the UI server are competing for database writes. 
+**Solution:** Stop both processes and restart them cleanly using \`autoweave start\`.
+
+## Missing OpenHands Runtime
+If \`autoweave doctor\` reports a missing OpenHands bootstrap path, ensure you have correctly installed the required Docker dependencies or pulled the latest OpenHands image.
+
+## Stale Runs Showing in Dashboard
+If the UI dashboard is showing stale runs or incomplete executions that are no longer active in the Celery queue:
+**Solution:** Run the cleanup command to purge stale state:
+\`\`\`bash
+autoweave cleanup-local-state
+\`\`\`
+
+## UI Fails to Bind Port
+If starting the UI throws an "Address already in use" error for port 8766:
+**Solution:** Kill any existing processes bound to that port:
+\`\`\`bash
+kill -9 \$(lsof -t -i :8766)
+\`\`\`
+`,
         };
 
         /* --- SPA State & Logic --- */
@@ -3397,7 +3464,7 @@ Build AutoWeave as a **Vertex-AI-backed, OpenHands-powered multi-agent orchestra
             
             // Docs routing handles sub-routes implicitly
             let mainRoute = route;
-            if (["ARCHITECTURE", "DEPLOYMENT", "autoweave_diagrams_source", "autoweave_high_level_architecture", "autoweave_implementation_spec"].includes(route)) {
+            if (["ARCHITECTURE", "DEPLOYMENT", "autoweave_diagrams_source", "autoweave_high_level_architecture", "autoweave_implementation_spec", "help_cli_reference", "help_quick_start", "help_troubleshooting"].includes(route)) {
                 mainRoute = 'docs';
             }
             
