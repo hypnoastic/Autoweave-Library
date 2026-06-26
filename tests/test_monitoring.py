@@ -427,12 +427,11 @@ def test_monitoring_dashboard_wsgi_app_serves_state_and_launch(tmp_path: Path) -
     launch = client.post("/api/run", json={"request": "Build a storefront", "max_steps": 3, "dispatch": True})
 
     assert index.status_code == 200
-    assert "AutoWeave Operator Console" in index.text
-    assert "Workflow Runs" in index.text
-    assert "Tasks / DAG" in index.text
-    assert "Observability / Events" in index.text
-    assert "Settings / Config" in index.text
-    assert "Active workers" in index.text
+    assert "AutoWeave Library | Console" in index.text
+    assert "Playground" in index.text
+    assert "Agents" in index.text
+    assert "Project Info" in index.text
+    assert "Active Workers" in index.text
     assert state.status_code == 200
     assert state.json()["status"] == "ok"
     assert state.json()["selected_run_id"] == "run_demo_1"
