@@ -33,13 +33,13 @@ AutoWeave is the **execution engine** for multi-agent software engineering teams
 
 ### Key Features
 
-- 🔀 **Workflow Orchestration** — Define, compile, and execute DAGs of agentic tasks with dependency-aware dynamic scheduling
-- 💾 **Durable State** — Resume paused runs, track attempts, persist context safely across PostgreSQL
-- 🤝 **Human-in-the-Loop** — Native primitives for pausing execution to request approvals or clarifications
-- 📋 **Queue Dispatch** — Offload long-running tasks to Celery workers backed by Redis
-- 🔍 **Local Monitoring** — Inspect runs via a lightweight local dashboard and playground
-- 🧠 **Context Layered Resolution** — Workspace → Postgres → pgvector → Artifact Store → Neo4j → Redis → typed miss escalation
-- 📊 **Observability** — OpenTelemetry-compatible spans, metrics, and domain events
+- **Workflow Orchestration** — Define, compile, and execute DAGs of agentic tasks with dependency-aware dynamic scheduling
+- **Durable State** — Resume paused runs, track attempts, persist context safely across PostgreSQL
+- **Human-in-the-Loop** — Native primitives for pausing execution to request approvals or clarifications
+- **Queue Dispatch** — Offload long-running tasks to Celery workers backed by Redis
+- **Local Monitoring** — Inspect runs via a lightweight local dashboard and playground
+- **Context Layered Resolution** — Workspace → Postgres → pgvector → Artifact Store → Neo4j → Redis → typed miss escalation
+- **Observability** — OpenTelemetry-compatible spans, metrics, and domain events
 
 ---
 
@@ -69,7 +69,7 @@ flowchart TD
 4. **Human intervention is first-class** — Clarifications, approvals, and overrides are formal workflow objects
 5. **One sandbox per task attempt** — Isolated worktree per execution
 
-> 📖 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture specification.
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture specification.
 
 ---
 
@@ -207,7 +207,7 @@ See [`.env.example`](.env.example) for all configuration options. Key variables:
 | `NEO4J_URL` | Neo4j connection URL | — |
 | `OPENHANDS_AGENT_SERVER_BASE_URL` | OpenHands server URL | `http://127.0.0.1:8000` |
 
-> 📖 See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
+> See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
 
 ---
 
@@ -241,7 +241,7 @@ make test:integration
 make test:ui
 ```
 
-> 📖 See [TESTING.md](TESTING.md) for the full testing philosophy and guidelines.
+> See [TESTING.md](TESTING.md) for the full testing philosophy and guidelines.
 
 ---
 
