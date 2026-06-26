@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +10,7 @@ import pytest
 
 pytest.importorskip("psycopg")
 import psycopg
+
 pytest.importorskip("neo4j")
 
 pytestmark = pytest.mark.skipif(
@@ -33,11 +34,11 @@ from autoweave.models import (
     MemoryEntryRecord,
     MemoryLayer,
     MissingContextReason,
-    WorkflowDefinitionRecord,
     TaskAttemptRecord,
     TaskEdgeRecord,
     TaskRecord,
     TaskState,
+    WorkflowDefinitionRecord,
     WorkflowGraph,
     WorkflowRunRecord,
 )
@@ -62,11 +63,17 @@ class FakeRedisClient:
         self.store: dict[str, tuple[str, datetime | None]] = {}
 
     def _purge(self) -> None:
-        expired = [key for key, (_, expires_at) in self.store.items() if expires_at is not None and expires_at <= self.clock.now()]
+        expired = [
+            key
+            for key, (_, expires_at) in self.store.items()
+            if expires_at is not None and expires_at <= self.clock.now()
+        ]
         for key in expired:
             self.store.pop(key, None)
 
-    def set(self, key: str, value: str, *, nx: bool = False, xx: bool = False, ex: int | None = None, px: int | None = None) -> bool:
+    def set(
+        self, key: str, value: str, *, nx: bool = False, xx: bool = False, ex: int | None = None, px: int | None = None
+    ) -> bool:
         self._purge()
         exists = key in self.store
         if nx and exists:
@@ -308,7 +315,9 @@ def test_postgres_repository_persists_canonical_state_across_reopen(
         update={
             "workflow_run": graph.workflow_run.model_copy(update={"graph_revision": 2}),
             "tasks": [
-                task.model_copy(update={"title": "Backend contract updated"}) if task.task_key == "backend_contract" else task
+                task.model_copy(update={"title": "Backend contract updated"})
+                if task.task_key == "backend_contract"
+                else task
                 for task in graph.tasks
             ],
         }
@@ -435,7 +444,9 @@ def test_postgres_repository_delete_workflow_run_removes_canonical_rows(
     assert repo.list_events(graph.workflow_run.id) == []
     assert repo.list_artifacts_for_run(graph.workflow_run.id) == []
     assert repo.list_memory_entries("workflow_run", graph.workflow_run.id) == []
-    assert [entry.id for entry in repo.list_memory_entries("project", graph.workflow_run.project_id)] == [unrelated_memory.id]
+    assert [entry.id for entry in repo.list_memory_entries("project", graph.workflow_run.project_id)] == [
+        unrelated_memory.id
+    ]
     assert repo.delete_workflow_run(graph.workflow_run.id) is False
 
 
@@ -483,7 +494,7 @@ def test_artifact_registry_persists_visibility_and_supersession(
 
 
 def test_redis_backed_coordination_manages_leases_and_idempotency() -> None:
-    clock = MutableClock(datetime.now(tz=UTC))
+    clock = MutableClock(datetime.now(tz=timezone.utc))
     client = FakeRedisClient(clock)
     leases = RedisLeaseManager(client=client)
     idempotency = RedisIdempotencyStore(client=client)

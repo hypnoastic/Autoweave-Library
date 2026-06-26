@@ -55,18 +55,20 @@ class EventService:
     ) -> EventRecord:
         normalized = normalize_event(event, correlation=correlation)
         if redact:
-            normalized = normalized.model_copy(
-                update={"payload_json": redact_payload(normalized.payload_json)}
-            )
+            normalized = normalized.model_copy(update={"payload_json": redact_payload(normalized.payload_json)})
 
-        span = self.tracer.span(
-            "autoweave.event.publish",
-            attributes={
-                "event_type": normalized.event_type,
-                "source": normalized.source,
-                "workflow_run_id": normalized.workflow_run_id,
-            },
-        ) if self.tracer is not None else None
+        span = (
+            self.tracer.span(
+                "autoweave.event.publish",
+                attributes={
+                    "event_type": normalized.event_type,
+                    "source": normalized.source,
+                    "workflow_run_id": normalized.workflow_run_id,
+                },
+            )
+            if self.tracer is not None
+            else None
+        )
 
         if span is not None:
             with span:
@@ -109,4 +111,3 @@ class EventService:
 
     def replay(self, workflow_run_id: str, *, cursor: Any | None = None) -> list[EventRecord]:
         return self.stream.replay(workflow_run_id, cursor=cursor)
-

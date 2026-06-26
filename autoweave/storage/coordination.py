@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import Any, Callable, Generic, TypeVar
+from datetime import datetime, timedelta, timezone
+from typing import Any, Generic, TypeVar
 from urllib.parse import urlparse
 
 
 def utc_now() -> datetime:
-    return datetime.now(tz=UTC)
+    return datetime.now(tz=timezone.utc)
 
 
 Clock = Callable[[], datetime]
@@ -163,10 +164,10 @@ class RedisClient:
 
     def _encode(self, parts: tuple[Any, ...] | list[Any]) -> bytes:
         payload = bytearray()
-        payload.extend(f"*{len(parts)}\r\n".encode("utf-8"))
+        payload.extend(f"*{len(parts)}\r\n".encode())
         for part in parts:
             encoded = str(part).encode("utf-8")
-            payload.extend(f"${len(encoded)}\r\n".encode("utf-8"))
+            payload.extend(f"${len(encoded)}\r\n".encode())
             payload.extend(encoded)
             payload.extend(b"\r\n")
         return bytes(payload)

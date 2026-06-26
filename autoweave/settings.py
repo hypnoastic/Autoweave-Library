@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 from urllib.parse import urlparse, urlunparse
 
 from dotenv import dotenv_values
@@ -137,7 +137,7 @@ class PostgresTarget(BaseModel):
     uses_neon: bool = False
 
     @classmethod
-    def from_url(cls, url: str) -> "PostgresTarget":
+    def from_url(cls, url: str) -> PostgresTarget:
         parsed = urlparse(url)
         query: dict[str, str] = {}
         if parsed.query:
@@ -179,7 +179,7 @@ class Neo4jTarget(BaseModel):
         *,
         username: str | None = None,
         password: str | None = None,
-    ) -> "Neo4jTarget":
+    ) -> Neo4jTarget:
         parsed = urlparse(url)
         default_port = 7687 if parsed.scheme.startswith("neo4j") or parsed.scheme.startswith("bolt") else 443
         return cls(
@@ -209,7 +209,7 @@ class RedisTarget(BaseModel):
     database: int = 0
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisTarget":
+    def from_url(cls, url: str) -> RedisTarget:
         parsed = urlparse(url)
         database = int(parsed.path.lstrip("/") or "0")
         return cls(url=url, host=parsed.hostname or "127.0.0.1", port=parsed.port or 6379, database=database)
@@ -287,15 +287,21 @@ class LocalEnvironmentSettings(BaseModel):
         root: Path | None = None,
         environ: Mapping[str, str] | None = None,
         materialize_vertex_credentials: bool = True,
-    ) -> "LocalEnvironmentSettings":
+    ) -> LocalEnvironmentSettings:
         project_root = find_project_root(root)
         env_map, loaded_files = load_env_map(project_root, environ=environ)
 
-        credentials_path = ensure_vertex_credentials_layout(project_root) if materialize_vertex_credentials else project_root / CANONICAL_VERTEX_CREDENTIALS
+        credentials_path = (
+            ensure_vertex_credentials_layout(project_root)
+            if materialize_vertex_credentials
+            else project_root / CANONICAL_VERTEX_CREDENTIALS
+        )
         vertex_value = get_env_value(env_map, "VERTEXAI_SERVICE_ACCOUNT_FILE", str(CANONICAL_VERTEX_CREDENTIALS))
         google_value = get_env_value(env_map, "GOOGLE_APPLICATION_CREDENTIALS", vertex_value)
 
-        artifact_store_url = get_env_value(env_map, "ARTIFACT_STORE_URL", f"file://{(project_root / DEFAULT_ARTIFACT_DIR).resolve()}")
+        artifact_store_url = get_env_value(
+            env_map, "ARTIFACT_STORE_URL", f"file://{(project_root / DEFAULT_ARTIFACT_DIR).resolve()}"
+        )
 
         openhands_worker_timeout_seconds = int(get_env_value(env_map, "OPENHANDS_WORKER_TIMEOUT_SECONDS", "1800"))
         explicit_poll_timeout = get_env_value(env_map, "AUTOWEAVE_OPENHANDS_POLL_TIMEOUT_SECONDS")
@@ -331,14 +337,26 @@ class LocalEnvironmentSettings(BaseModel):
             neo4j_username=get_env_value(env_map, "NEO4J_USERNAME") or None,
             neo4j_password=get_env_value(env_map, "NEO4J_PASSWORD") or None,
             artifact_store_url=artifact_store_url,
-            openhands_agent_server_base_url=get_env_value(env_map, "OPENHANDS_AGENT_SERVER_BASE_URL", "http://127.0.0.1:8000"),
+            openhands_agent_server_base_url=get_env_value(
+                env_map, "OPENHANDS_AGENT_SERVER_BASE_URL", "http://127.0.0.1:8000"
+            ),
             openhands_agent_server_api_key=get_env_value(env_map, "OPENHANDS_AGENT_SERVER_API_KEY") or None,
             openhands_worker_timeout_seconds=openhands_worker_timeout_seconds,
-            autoweave_default_workflow=Path(get_env_value(env_map, "AUTOWEAVE_DEFAULT_WORKFLOW", "configs/workflows/team.workflow.yaml")),
-            autoweave_runtime_config=Path(get_env_value(env_map, "AUTOWEAVE_RUNTIME_CONFIG", "configs/runtime/runtime.yaml")),
-            autoweave_storage_config=Path(get_env_value(env_map, "AUTOWEAVE_STORAGE_CONFIG", "configs/runtime/storage.yaml")),
-            autoweave_vertex_config=Path(get_env_value(env_map, "AUTOWEAVE_VERTEX_CONFIG", "configs/runtime/vertex.yaml")),
-            autoweave_observability_config=Path(get_env_value(env_map, "AUTOWEAVE_OBSERVABILITY_CONFIG", "configs/runtime/observability.yaml")),
+            autoweave_default_workflow=Path(
+                get_env_value(env_map, "AUTOWEAVE_DEFAULT_WORKFLOW", "configs/workflows/team.workflow.yaml")
+            ),
+            autoweave_runtime_config=Path(
+                get_env_value(env_map, "AUTOWEAVE_RUNTIME_CONFIG", "configs/runtime/runtime.yaml")
+            ),
+            autoweave_storage_config=Path(
+                get_env_value(env_map, "AUTOWEAVE_STORAGE_CONFIG", "configs/runtime/storage.yaml")
+            ),
+            autoweave_vertex_config=Path(
+                get_env_value(env_map, "AUTOWEAVE_VERTEX_CONFIG", "configs/runtime/vertex.yaml")
+            ),
+            autoweave_observability_config=Path(
+                get_env_value(env_map, "AUTOWEAVE_OBSERVABILITY_CONFIG", "configs/runtime/observability.yaml")
+            ),
             autoweave_vertex_profile_override=get_env_value(env_map, "AUTOWEAVE_VERTEX_PROFILE_OVERRIDE") or None,
             autoweave_canonical_backend=canonical_backend,
             autoweave_graph_backend=graph_backend,
@@ -346,7 +364,9 @@ class LocalEnvironmentSettings(BaseModel):
             autoweave_state_dir=Path(get_env_value(env_map, "AUTOWEAVE_STATE_DIR", "var/state")),
             autoweave_autonomy_level=get_env_value(env_map, "AUTOWEAVE_AUTONOMY_LEVEL", "medium"),
             autoweave_max_active_attempts=int(get_env_value(env_map, "AUTOWEAVE_MAX_ACTIVE_ATTEMPTS", "8")),
-            autoweave_heartbeat_interval_seconds=int(get_env_value(env_map, "AUTOWEAVE_HEARTBEAT_INTERVAL_SECONDS", "15")),
+            autoweave_heartbeat_interval_seconds=int(
+                get_env_value(env_map, "AUTOWEAVE_HEARTBEAT_INTERVAL_SECONDS", "15")
+            ),
             autoweave_lease_ttl_seconds=int(get_env_value(env_map, "AUTOWEAVE_LEASE_TTL_SECONDS", "60")),
             autoweave_openhands_poll_timeout_seconds=openhands_poll_timeout_seconds,
             autoweave_openhands_poll_interval_seconds=int(

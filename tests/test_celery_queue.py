@@ -159,18 +159,10 @@ def test_recover_workflows_requeues_nonterminal_runs_without_open_human_loops(mo
     repository = SimpleNamespace(
         list_workflow_runs=lambda: [runnable_run, waiting_for_human_run, completed_run],
         list_human_requests_for_run=lambda workflow_run_id: (
-            [
-                SimpleNamespace(status=HumanRequestStatus.OPEN)
-            ]
-            if workflow_run_id == "run_waiting_human"
-            else []
+            [SimpleNamespace(status=HumanRequestStatus.OPEN)] if workflow_run_id == "run_waiting_human" else []
         ),
         list_approval_requests_for_run=lambda workflow_run_id: (
-            [
-                SimpleNamespace(status=ApprovalStatus.REQUESTED)
-            ]
-            if workflow_run_id == "run_waiting_approval"
-            else []
+            [SimpleNamespace(status=ApprovalStatus.REQUESTED)] if workflow_run_id == "run_waiting_approval" else []
         ),
     )
 

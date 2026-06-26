@@ -7,15 +7,16 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import httpx
 
 from autoweave.config_models import VertexConfig
-from autoweave.models import ArtifactRecord, ArtifactStatus, ModelRouteRecord, TaskAttemptRecord, TaskRecord
 from autoweave.exceptions import ConfigurationError
+from autoweave.models import ArtifactRecord, ArtifactStatus, ModelRouteRecord, TaskAttemptRecord, TaskRecord
 
 
 def build_vertex_worker_env(
@@ -143,7 +144,22 @@ def normalize_openhands_stream_event(event: Mapping[str, Any] | OpenHandsStreamE
             return normalized
     payload_json = payload.get("payload_json")
     if not isinstance(payload_json, dict):
-        payload_json = {k: v for k, v in payload.items() if k not in {"event_type", "type", "message", "text", "artifact", "outcome", "terminal", "requires_human", "approval_required"}}
+        payload_json = {
+            k: v
+            for k, v in payload.items()
+            if k
+            not in {
+                "event_type",
+                "type",
+                "message",
+                "text",
+                "artifact",
+                "outcome",
+                "terminal",
+                "requires_human",
+                "approval_required",
+            }
+        }
     artifact = payload.get("artifact")
     if artifact is not None and not isinstance(artifact, dict):
         artifact = {"content": artifact}
@@ -166,10 +182,18 @@ def extract_openhands_stream_events(payload: Mapping[str, Any]) -> list[OpenHand
     for key in ("events", "stream", "messages"):
         raw_events = payload.get(key)
         if isinstance(raw_events, list):
-            return [normalize_openhands_stream_event(item) for item in raw_events if isinstance(item, Mapping) or isinstance(item, OpenHandsStreamEvent)]
+            return [
+                normalize_openhands_stream_event(item)
+                for item in raw_events
+                if isinstance(item, (Mapping, OpenHandsStreamEvent))
+            ]
     raw_items = payload.get("items")
     if isinstance(raw_items, list):
-        return [normalize_openhands_stream_event(item) for item in raw_items if isinstance(item, Mapping) or isinstance(item, OpenHandsStreamEvent)]
+        return [
+            normalize_openhands_stream_event(item)
+            for item in raw_items
+            if isinstance(item, (Mapping, OpenHandsStreamEvent))
+        ]
     return []
 
 
@@ -290,15 +314,9 @@ def _normalize_openhands_api_event(payload: dict[str, Any], kind: str) -> OpenHa
         tool_name = str(payload.get("tool_name") or "")
         action_payload = payload.get("action")
         observation_payload = payload.get("observation")
-        action_kind = (
-            str(action_payload.get("kind") or "")
-            if isinstance(action_payload, Mapping)
-            else ""
-        )
+        action_kind = str(action_payload.get("kind") or "") if isinstance(action_payload, Mapping) else ""
         observation_kind = (
-            str(observation_payload.get("kind") or "")
-            if isinstance(observation_payload, Mapping)
-            else ""
+            str(observation_payload.get("kind") or "") if isinstance(observation_payload, Mapping) else ""
         )
         if tool_name == "finish" or action_kind == "FinishAction" or observation_kind == "FinishObservation":
             finish_message = ""
@@ -353,10 +371,10 @@ def _extract_control_marker(message: str) -> tuple[str, str | None]:
     upper = text.upper()
     for prefix in _HUMAN_INPUT_PREFIXES:
         if upper.startswith(prefix):
-            return text[len(prefix):].strip(), "human_input_required"
+            return text[len(prefix) :].strip(), "human_input_required"
     for prefix in _APPROVAL_REQUIRED_PREFIXES:
         if upper.startswith(prefix):
-            return text[len(prefix):].strip(), "approval_required"
+            return text[len(prefix) :].strip(), "approval_required"
     return message, None
 
 
@@ -383,9 +401,12 @@ def extract_semantic_clarification_questions(message: str) -> tuple[str, ...]:
 
     lower_text = text.lower()
     cue_present = any(phrase in lower_text for phrase in _CLARIFICATION_CUE_PHRASES)
-    if not cue_present and len(candidates) == 1:
-        if not any(token in lower_text for token in ("clarif", "confirm", "missing", "before", "need")):
-            return ()
+    if (
+        not cue_present
+        and len(candidates) == 1
+        and not any(token in lower_text for token in ("clarif", "confirm", "missing", "before", "need"))
+    ):
+        return ()
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -439,12 +460,7 @@ def stream_event_to_artifact(
     metadata_json = artifact_payload.get("metadata_json")
     if not isinstance(metadata_json, dict):
         metadata_json = {}
-    summary = str(
-        artifact_payload.get("summary")
-        or event.message
-        or artifact_payload.get("content")
-        or ""
-    )
+    summary = str(artifact_payload.get("summary") or event.message or artifact_payload.get("content") or "")
     return ArtifactRecord(
         workflow_run_id=task.workflow_run_id,
         task_id=task.id,
@@ -489,7 +505,7 @@ class OpenHandsAgentServerClient:
         if self.client is not None:
             self.client.close()
 
-    def __enter__(self) -> "OpenHandsAgentServerClient":
+    def __enter__(self) -> OpenHandsAgentServerClient:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -685,11 +701,7 @@ def build_openhands_conversation_request(launch_payload: dict[str, Any]) -> dict
         )
         for question, answer in sorted(clarification_answers.items()):
             prompt_lines.append(f"- {question} -> {answer}")
-    if (
-        latest_human_answer
-        and latest_human_answer["question"]
-        and latest_human_answer["answer_text"]
-    ):
+    if latest_human_answer and latest_human_answer["question"] and latest_human_answer["answer_text"]:
         prompt_lines.extend(
             (
                 "Latest Human Answer:",

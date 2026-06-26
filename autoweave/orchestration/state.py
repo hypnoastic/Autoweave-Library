@@ -12,12 +12,13 @@ from autoweave.models import (
     HumanRequestRecord,
     HumanRequestStatus,
     HumanRequestType,
+    TaskAttemptRecord,
+    TaskEdgeRecord,
     TaskRecord,
     TaskState,
-    TaskAttemptRecord,
+    WorkflowGraph,
     WorkflowRunStatus,
     utc_now,
-    WorkflowGraph,
 )
 from autoweave.orchestration.graph import DependencyView, build_dependency_view
 
@@ -36,7 +37,7 @@ class WorkflowRunState:
     graph_revision: int = 1
 
     @classmethod
-    def from_graph(cls, graph: WorkflowGraph) -> "WorkflowRunState":
+    def from_graph(cls, graph: WorkflowGraph) -> WorkflowRunState:
         return cls(
             graph=graph,
             tasks_by_id={task.id: task for task in graph.tasks},
@@ -207,11 +208,7 @@ class WorkflowRunState:
             raise KeyError(f"attempt {attempt_id!r} is not registered") from exc
 
     def active_attempts(self, task_id: str | None = None) -> list[TaskAttemptRecord]:
-        attempt_ids = (
-            self.attempts_by_task_id.get(task_id, [])
-            if task_id is not None
-            else list(self.attempts_by_id)
-        )
+        attempt_ids = self.attempts_by_task_id.get(task_id, []) if task_id is not None else list(self.attempts_by_id)
         active: list[TaskAttemptRecord] = []
         for attempt_id in attempt_ids:
             attempt = self.attempts_by_id.get(attempt_id)
@@ -294,9 +291,7 @@ class WorkflowRunState:
             reasons.append("already_running")
         if not self.hard_dependencies_satisfied(task.id):
             pending = [
-                parent.task_key
-                for parent in self.hard_predecessors(task.id)
-                if parent.state != TaskState.COMPLETED
+                parent.task_key for parent in self.hard_predecessors(task.id) if parent.state != TaskState.COMPLETED
             ]
             reasons.append(f"waiting_on_dependencies:{','.join(sorted(pending))}")
         return reasons
@@ -333,9 +328,7 @@ class WorkflowRunState:
         if task.state != TaskState.READY:
             raise StateTransitionError(f"task {task.task_key!r} must be ready before it can start")
         if not self.hard_dependencies_satisfied(task.id):
-            raise StateTransitionError(
-                f"task {task.task_key!r} cannot start with unresolved hard dependencies"
-            )
+            raise StateTransitionError(f"task {task.task_key!r} cannot start with unresolved hard dependencies")
         task = task.transition(TaskState.IN_PROGRESS)
         self.mark_workflow_running()
         return self.update_task(task)
@@ -380,9 +373,7 @@ class WorkflowRunState:
         task = self.task(task_id)
         if not self.hard_dependencies_satisfied(task.id):
             pending = [
-                parent.task_key
-                for parent in self.hard_predecessors(task.id)
-                if parent.state != TaskState.COMPLETED
+                parent.task_key for parent in self.hard_predecessors(task.id) if parent.state != TaskState.COMPLETED
             ]
             raise StateTransitionError(
                 f"task {task.task_key!r} cannot complete with unresolved hard dependencies: {pending}"
@@ -409,9 +400,7 @@ class WorkflowRunState:
         task = self.task(task_id)
         open_request = self._open_human_request_for_task(task.id, HumanRequestType.CLARIFICATION)
         if open_request is not None:
-            open_request = open_request.model_copy(
-                update={"question": question, "context_summary": context_summary}
-            )
+            open_request = open_request.model_copy(update={"question": question, "context_summary": context_summary})
             self.human_requests[open_request.id] = open_request
             if task.state != TaskState.WAITING_FOR_HUMAN:
                 task = task.transition(TaskState.WAITING_FOR_HUMAN)
@@ -507,16 +496,22 @@ class WorkflowRunState:
         ready = self.promote_ready_tasks()
         return [task for task in ready if task.state == TaskState.READY]
 
-    def _open_human_request_for_task(
-        self, task_id: str, request_type: HumanRequestType
-    ) -> HumanRequestRecord | None:
+    def _open_human_request_for_task(self, task_id: str, request_type: HumanRequestType) -> HumanRequestRecord | None:
         for request in self.human_requests.values():
-            if request.task_id == task_id and request.request_type == request_type and request.status == HumanRequestStatus.OPEN:
+            if (
+                request.task_id == task_id
+                and request.request_type == request_type
+                and request.status == HumanRequestStatus.OPEN
+            ):
                 return request
         return None
 
     def _open_approval_request_for_task(self, task_id: str, approval_type: str) -> ApprovalRequestRecord | None:
         for request in self.approval_requests.values():
-            if request.task_id == task_id and request.approval_type == approval_type and request.status == ApprovalStatus.REQUESTED:
+            if (
+                request.task_id == task_id
+                and request.approval_type == approval_type
+                and request.status == ApprovalStatus.REQUESTED
+            ):
                 return request
         return None

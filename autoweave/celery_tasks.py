@@ -7,7 +7,12 @@ from typing import Any
 
 from celery import shared_task
 
-from autoweave.celery_queue import WORKFLOW_TASK_NAME, create_autoweave_celery_app, should_requeue_report, workflow_report_to_payload
+from autoweave.celery_queue import (
+    WORKFLOW_TASK_NAME,
+    create_autoweave_celery_app,
+    should_requeue_report,
+    workflow_report_to_payload,
+)
 from autoweave.local_runtime import build_local_runtime
 
 

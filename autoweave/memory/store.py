@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
-from autoweave.models import MemoryEntryRecord, MemoryLayer
+from autoweave.models import MemoryEntryRecord
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,9 @@ class InMemoryMemoryStore:
         return matches[:top_k]
 
     def list_scope(self, scope_type: str, scope_id: str) -> list[MemoryEntryRecord]:
-        return [self._entries[entry_id].model_copy(deep=True) for entry_id in self._by_scope.get((scope_type, scope_id), [])]
+        return [
+            self._entries[entry_id].model_copy(deep=True) for entry_id in self._by_scope.get((scope_type, scope_id), [])
+        ]
 
     def delete_matching(self, predicate: Callable[[MemoryEntryRecord], bool]) -> tuple[str, ...]:
         deleted_ids: list[str] = []

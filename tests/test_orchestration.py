@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from textwrap import dedent
 
 import pytest
@@ -122,9 +122,7 @@ def test_workflow_graph_propagates_root_input_to_all_tasks() -> None:
         root_input_json={"user_request": "build a clothing storefront"},
     )
 
-    assert {
-        task.task_key: task.input_json for task in graph.tasks
-    } == {
+    assert {task.task_key: task.input_json for task in graph.tasks} == {
         "manager_plan": {"user_request": "build a clothing storefront"},
         "frontend_ui": {"user_request": "build a clothing storefront"},
     }
@@ -243,7 +241,7 @@ def test_approval_rejection_prevents_completion() -> None:
 
 def test_workflow_completion_sets_real_ended_at_timestamp() -> None:
     graph = example_notifications_workflow_graph()
-    started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    started_at = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
     graph = graph.model_copy(
         update={
             "workflow_run": graph.workflow_run.model_copy(update={"started_at": started_at}),
@@ -259,7 +257,7 @@ def test_workflow_completion_sets_real_ended_at_timestamp() -> None:
 
 def test_workflow_failure_sets_real_ended_at_timestamp() -> None:
     graph = example_notifications_workflow_graph()
-    started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    started_at = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
     graph = graph.model_copy(
         update={
             "workflow_run": graph.workflow_run.model_copy(update={"started_at": started_at}),

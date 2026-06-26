@@ -54,9 +54,7 @@ class JsonlEventStore:
     def list_events(self, workflow_run_id: str) -> list[EventRecord]:
         return [event.model_copy() for event in self._events_by_run.get(workflow_run_id, [])]
 
-    def replay_from(
-        self, workflow_run_id: str, cursor: EventCursor | None = None
-    ) -> list[EventRecord]:
+    def replay_from(self, workflow_run_id: str, cursor: EventCursor | None = None) -> list[EventRecord]:
         events = self.list_events(workflow_run_id)
         if cursor is None:
             return events
