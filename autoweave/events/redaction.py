@@ -49,8 +49,4 @@ def redact_value(value: Any, *, key: str | None = None) -> Any:
 def redact_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     if payload is None:
         return {}
-    return {
-        key: redact_value(value, key=key)
-        for key, value in payload.items()
-    }
-
+    return {key: redact_value(value, key=key) for key, value in payload.items()}

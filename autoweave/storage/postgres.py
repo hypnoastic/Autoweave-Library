@@ -90,18 +90,14 @@ class PostgresWorkflowRepository:
             connect_timeout=self.config.connect_timeout_seconds,
             row_factory=dict_row,
         )
-        setattr(conn, "_pool", self)
+        conn._pool = self
         self._cached_connection = conn
         return conn
 
     def _initialize(self) -> None:
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
-                        sql.Identifier(self.config.schema)
-                    )
-                )
+                cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(self.config.schema)))
                 cursor.execute(
                     sql.SQL(
                         """
@@ -305,9 +301,9 @@ class PostgresWorkflowRepository:
             task_ids = [str(row["id"]) for row in task_rows]
             if task_ids:
                 conn.execute(
-                    sql.SQL(
-                        "DELETE FROM {} WHERE scope_type = %s AND scope_id = ANY(%s)"
-                    ).format(self._qualified("memory_entries")),
+                    sql.SQL("DELETE FROM {} WHERE scope_type = %s AND scope_id = ANY(%s)").format(
+                        self._qualified("memory_entries")
+                    ),
                     ("task", task_ids),
                 )
             conn.execute(
@@ -359,9 +355,7 @@ class PostgresWorkflowRepository:
 
     def list_workflow_runs(self) -> list[WorkflowRunRecord]:
         with self._connect() as conn:
-            rows = conn.execute(
-                sql.SQL("SELECT data_json FROM {}").format(self._qualified("workflow_runs"))
-            ).fetchall()
+            rows = conn.execute(sql.SQL("SELECT data_json FROM {}").format(self._qualified("workflow_runs"))).fetchall()
         runs = [WorkflowRunRecord.model_validate_json(row["data_json"]) for row in rows]
         runs.sort(
             key=lambda item: (
@@ -400,9 +394,7 @@ class PostgresWorkflowRepository:
     def get_workflow_definition(self, definition_id: str) -> WorkflowDefinitionRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("workflow_definitions")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("workflow_definitions")),
                 (definition_id,),
             ).fetchone()
             if row is None:
@@ -437,9 +429,7 @@ class PostgresWorkflowRepository:
     def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("workflow_runs")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
                 (workflow_run_id,),
             ).fetchone()
             if row is None:
@@ -482,9 +472,7 @@ class PostgresWorkflowRepository:
             try:
                 with self._connect() as conn:
                     row = conn.execute(
-                        sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                            self._qualified("tasks")
-                        ),
+                        sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("tasks")),
                         (task_id,),
                     ).fetchone()
                     if row is None:
@@ -504,9 +492,7 @@ class PostgresWorkflowRepository:
                 (workflow_run_id, task_key),
             ).fetchone()
             if row is None:
-                raise KeyError(
-                    f"task {task_key!r} is not registered in workflow run {workflow_run_id!r}"
-                )
+                raise KeyError(f"task {task_key!r} is not registered in workflow run {workflow_run_id!r}")
             return TaskRecord.model_validate_json(row["data_json"])
 
     def list_tasks_for_run(self, workflow_run_id: str) -> list[TaskRecord]:
@@ -578,9 +564,7 @@ class PostgresWorkflowRepository:
     def get_attempt(self, attempt_id: str) -> TaskAttemptRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("attempts")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("attempts")),
                 (attempt_id,),
             ).fetchone()
             if row is None:
@@ -637,9 +621,7 @@ class PostgresWorkflowRepository:
     def get_human_request(self, request_id: str) -> HumanRequestRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("human_requests")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("human_requests")),
                 (request_id,),
             ).fetchone()
             if row is None:
@@ -699,9 +681,7 @@ class PostgresWorkflowRepository:
     def get_approval_request(self, request_id: str) -> ApprovalRequestRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("approval_requests")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("approval_requests")),
                 (request_id,),
             ).fetchone()
             if row is None:
@@ -796,9 +776,7 @@ class PostgresWorkflowRepository:
     def get_artifact(self, artifact_id: str) -> ArtifactRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("artifacts")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("artifacts")),
                 (artifact_id,),
             ).fetchone()
             if row is None:
@@ -852,9 +830,7 @@ class PostgresWorkflowRepository:
     def get_decision(self, decision_id: str) -> DecisionRecord:
         with self._connect() as conn:
             row = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(
-                    self._qualified("decisions")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE id = %s").format(self._qualified("decisions")),
                 (decision_id,),
             ).fetchone()
             if row is None:
@@ -864,9 +840,7 @@ class PostgresWorkflowRepository:
     def list_decisions_for_task(self, task_id: str) -> list[DecisionRecord]:
         with self._connect() as conn:
             rows = conn.execute(
-                sql.SQL("SELECT data_json FROM {} WHERE task_id = %s ORDER BY id").format(
-                    self._qualified("decisions")
-                ),
+                sql.SQL("SELECT data_json FROM {} WHERE task_id = %s ORDER BY id").format(self._qualified("decisions")),
                 (task_id,),
             ).fetchall()
         return [DecisionRecord.model_validate_json(row["data_json"]) for row in rows]
@@ -908,13 +882,15 @@ class PostgresWorkflowRepository:
         terms = [term for term in query.lower().split() if term]
         if not terms:
             return []
-        where = sql.SQL(" AND ").join(
-            sql.SQL("LOWER(content) LIKE %s") for _ in terms
-        )
+        where = sql.SQL(" AND ").join(sql.SQL("LOWER(content) LIKE %s") for _ in terms)
         params: list[object] = [scope_type, scope_id, *[f"%{term}%" for term in terms], top_k]
-        query_sql = sql.SQL(
-            "SELECT data_json FROM {} WHERE scope_type = %s AND scope_id = %s AND "
-        ).format(self._qualified("memory_entries")) + where + sql.SQL(" ORDER BY id LIMIT %s")
+        query_sql = (
+            sql.SQL("SELECT data_json FROM {} WHERE scope_type = %s AND scope_id = %s AND ").format(
+                self._qualified("memory_entries")
+            )
+            + where
+            + sql.SQL(" ORDER BY id LIMIT %s")
+        )
         with self._connect() as conn:
             rows = conn.execute(query_sql, params).fetchall()
         return [MemoryEntryRecord.model_validate_json(row["data_json"]) for row in rows]
@@ -931,18 +907,14 @@ class PostgresWorkflowRepository:
 
     def _graph_revision_for_run(self, conn: psycopg.Connection, workflow_run_id: str) -> int:
         row = conn.execute(
-            sql.SQL("SELECT graph_revision FROM {} WHERE id = %s").format(
-                self._qualified("workflow_runs")
-            ),
+            sql.SQL("SELECT graph_revision FROM {} WHERE id = %s").format(self._qualified("workflow_runs")),
             (workflow_run_id,),
         ).fetchone()
         return int(row["graph_revision"]) if row is not None else 1
 
     def _task_workflow_run_id(self, conn: psycopg.Connection, task_id: str) -> str:
         row = conn.execute(
-            sql.SQL("SELECT workflow_run_id FROM {} WHERE id = %s").format(
-                self._qualified("tasks")
-            ),
+            sql.SQL("SELECT workflow_run_id FROM {} WHERE id = %s").format(self._qualified("tasks")),
             (task_id,),
         ).fetchone()
         if row is None:
@@ -953,17 +925,13 @@ class PostgresWorkflowRepository:
         self._save_workflow_run(graph.workflow_run, conn)
         with conn.cursor() as cursor:
             cursor.execute(
-                sql.SQL("DELETE FROM {} WHERE workflow_run_id = %s").format(
-                    self._qualified("tasks")
-                ),
+                sql.SQL("DELETE FROM {} WHERE workflow_run_id = %s").format(self._qualified("tasks")),
                 (graph.workflow_run.id,),
             )
             for task in graph.tasks:
                 self._save_task(task, conn)
             cursor.execute(
-                sql.SQL("DELETE FROM {} WHERE workflow_run_id = %s").format(
-                    self._qualified("edges")
-                ),
+                sql.SQL("DELETE FROM {} WHERE workflow_run_id = %s").format(self._qualified("edges")),
                 (graph.workflow_run.id,),
             )
             for edge in graph.edges:
@@ -1060,6 +1028,3 @@ class PostgresWorkflowRepository:
                 record.model_dump_json(),
             ),
         )
-
-
-from autoweave.storage.durable import SQLiteWorkflowRepository

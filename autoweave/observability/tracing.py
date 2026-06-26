@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
-from typing import Any, Iterator
+from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,7 +19,7 @@ class SpanRecord(BaseModel):
     parent_span_id: str | None = None
     name: str
     attributes: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     ended_at: datetime | None = None
 
     @property
@@ -45,10 +46,9 @@ class InMemoryTracer:
         try:
             yield record
         finally:
-            record = record.model_copy(update={"ended_at": datetime.now(tz=UTC)})
+            record = record.model_copy(update={"ended_at": datetime.now(tz=timezone.utc)})
             self.spans.append(record)
 
 
 def span_attributes(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
-

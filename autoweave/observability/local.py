@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from uuid import uuid4
 
 from autoweave.events.local import JsonlEventStore, _append_jsonl
@@ -29,7 +29,7 @@ class LocalObservabilityPaths:
     debug_path: Path
 
     @classmethod
-    def from_root(cls, root_dir: Path) -> "LocalObservabilityPaths":
+    def from_root(cls, root_dir: Path) -> LocalObservabilityPaths:
         base = root_dir / DEFAULT_OBSERVABILITY_DIR
         return cls(
             root_dir=base,
@@ -40,7 +40,7 @@ class LocalObservabilityPaths:
         )
 
     @classmethod
-    def from_settings(cls, settings: LocalEnvironmentSettings) -> "LocalObservabilityPaths":
+    def from_settings(cls, settings: LocalEnvironmentSettings) -> LocalObservabilityPaths:
         return cls.from_root(settings.project_root)
 
 
@@ -87,7 +87,7 @@ class JsonlTracer:
         try:
             yield record
         finally:
-            finished = record.model_copy(update={"ended_at": datetime.now(tz=UTC)})
+            finished = record.model_copy(update={"ended_at": datetime.now(tz=timezone.utc)})
             self.spans.append(finished)
             _write_jsonl(self.path, finished.model_dump(mode="json"))
 
@@ -141,7 +141,7 @@ class LocalObservabilityService:
         settings: LocalEnvironmentSettings,
         *,
         event_service: EventService | None = None,
-    ) -> "LocalObservabilityService":
+    ) -> LocalObservabilityService:
         return cls(settings=settings, event_service=event_service)
 
     def publish(

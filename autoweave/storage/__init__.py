@@ -18,16 +18,16 @@ __all__ = [
     "InMemoryRepositoryIndex",
     "InMemoryWorkflowRepository",
     "LocalStorageWiring",
+    "PostgresWorkflowRepository",
+    "ProjectGraphTask",
     "RedisClient",
     "RedisIdempotencyStore",
     "RedisLeaseManager",
-    "ProjectGraphTask",
     "RedisWireSpec",
-    "StorageConnectionTargets",
-    "PostgresWorkflowRepository",
-    "build_local_storage_wiring",
-    "WorkflowSnapshot",
     "SQLiteWorkflowRepository",
+    "StorageConnectionTargets",
+    "WorkflowSnapshot",
+    "build_local_storage_wiring",
 ]
 
 

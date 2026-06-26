@@ -32,7 +32,7 @@ class Neo4jGraphProjectionBackend:
     ) -> None:
         if not isinstance(url, str):
             target = Neo4jGraphTarget(
-                url=str(getattr(url, "url")),
+                url=str(url.url),
                 username=getattr(url, "username", None),
                 password=getattr(url, "password", None),
                 database=database,

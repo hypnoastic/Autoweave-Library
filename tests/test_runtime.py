@@ -15,12 +15,12 @@ from autoweave.workers.runtime import (
     OpenHandsStreamEvent,
     WorkspacePolicy,
     build_openhands_conversation_request,
-    extract_semantic_clarification_questions,
+    build_vertex_worker_env,
     extract_openhands_stream_events,
+    extract_semantic_clarification_questions,
     normalize_openhands_stream_event,
     resolve_openhands_reasoning_effort,
     stream_event_to_artifact,
-    build_vertex_worker_env,
 )
 
 
@@ -334,7 +334,12 @@ def test_human_input_marker_is_normalized_to_requires_human() -> None:
             "source": "agent",
             "llm_message": {
                 "role": "assistant",
-                "content": [{"type": "text", "text": "HUMAN_INPUT_REQUIRED: What product categories should the first release support?"}],
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "HUMAN_INPUT_REQUIRED: What product categories should the first release support?",
+                    }
+                ],
                 "tool_calls": None,
             },
         }

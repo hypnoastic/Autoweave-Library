@@ -62,7 +62,7 @@ class WorkflowDefinitionConfig(BaseConfigModel):
     completion_rules: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_entrypoint(self) -> "WorkflowDefinitionConfig":
+    def validate_entrypoint(self) -> WorkflowDefinitionConfig:
         known_keys = {template.key for template in self.task_templates}
         if self.entrypoint not in known_keys:
             raise ValueError(f"entrypoint {self.entrypoint!r} is not defined in task_templates")

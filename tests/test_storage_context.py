@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from autoweave.artifacts import ArtifactHandle, InMemoryArtifactRegistry
 from autoweave.context import InMemoryContextService
@@ -11,8 +11,6 @@ from autoweave.models import (
     ArtifactRecord,
     ArtifactStatus,
     EventRecord,
-    MemoryEntryRecord,
-    MemoryLayer,
     MissingContextReason,
     TaskAttemptRecord,
     TaskEdgeRecord,
@@ -320,6 +318,7 @@ def test_repository_delete_workflow_run_removes_canonical_records() -> None:
     else:  # pragma: no cover - defensive
         raise AssertionError("deleted workflow run should not remain readable")
 
+
 def test_large_artifact_returns_handle_and_unrelated_workflows_are_hidden() -> None:
     repo = InMemoryWorkflowRepository()
     graph = build_example_graph("run-1", "proj-1")
@@ -343,7 +342,9 @@ def test_large_artifact_returns_handle_and_unrelated_workflows_are_hidden() -> N
         )
     )
 
-    payload = registry.resolve_payload(next(iter(registry.get_upstream_artifacts(task_id=graph.tasks[2].id))).id, max_inline_bytes=128)
+    payload = registry.resolve_payload(
+        next(iter(registry.get_upstream_artifacts(task_id=graph.tasks[2].id))).id, max_inline_bytes=128
+    )
     assert isinstance(payload, ArtifactHandle)
     assert payload.size_bytes == 1024
     assert payload.storage_uri == "blob://run-1/large-contract"
@@ -376,7 +377,7 @@ def test_typed_miss_results_are_returned_for_missing_task_and_memory() -> None:
 
 
 def test_lease_recovery_and_idempotency_claims_after_expiry() -> None:
-    clock = MutableClock(datetime(2026, 3, 19, tzinfo=UTC))
+    clock = MutableClock(datetime(2026, 3, 19, tzinfo=timezone.utc))
     leases = InMemoryLeaseManager(clock=clock.now)
     idempotency = InMemoryIdempotencyStore(clock=clock.now)
 

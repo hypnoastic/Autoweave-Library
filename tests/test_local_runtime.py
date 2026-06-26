@@ -10,11 +10,11 @@ import httpx
 from typer.testing import CliRunner
 
 from apps.cli import main as cli_main
-from autoweave.local_runtime import build_local_runtime
 from autoweave.artifacts.filesystem import FilesystemArtifactStore
 from autoweave.artifacts.registry import InMemoryArtifactRegistry
 from autoweave.context.service import InMemoryContextService
 from autoweave.graph.projection import SQLiteGraphProjectionBackend
+from autoweave.local_runtime import build_local_runtime
 from autoweave.memory.store import InMemoryMemoryStore
 from autoweave.models import AttemptState, MemoryEntryRecord, MemoryLayer
 from autoweave.settings import CANONICAL_VERTEX_CREDENTIALS, LocalEnvironmentSettings
@@ -22,7 +22,6 @@ from autoweave.storage.coordination import RedisClient, RedisIdempotencyStore, R
 from autoweave.storage.durable import SQLiteWorkflowRepository
 from autoweave.storage.wiring import LocalStorageWiring, RedisWireSpec, StorageConnectionTargets
 from autoweave.workers.runtime import OpenHandsAgentServerClient, OpenHandsStreamEvent
-
 
 runner = CliRunner()
 
@@ -530,7 +529,9 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
     assert example.openhands_health.ok is True
     assert example.launch_payload["env"]["GOOGLE_APPLICATION_CREDENTIALS"] == str(normalized_credentials)
     assert example.launch_payload["runtime_policy"]["reasoning_effort"] == "none"
-    assert example.launch_payload["workspace_path"] == str(tmp_path / "workspaces" / example.launch_payload["task_attempt_id"])
+    assert example.launch_payload["workspace_path"] == str(
+        tmp_path / "workspaces" / example.launch_payload["task_attempt_id"]
+    )
     assert example.task_state == "completed"
     assert example.attempt_state == "succeeded"
     assert example.workflow_status == "running"
@@ -539,7 +540,9 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
     manifests = [runtime.storage.artifact_store.read_manifest(artifact_id) for artifact_id in example.artifact_ids]
     assert {manifest["artifact"]["artifact_type"] for manifest in manifests} == {"plan", "openhands_replay"}
     assert any(manifest["payload"] == "final notifications plan" for manifest in manifests)
-    replay_manifest = next(manifest for manifest in manifests if manifest["artifact"]["artifact_type"] == "openhands_replay")
+    replay_manifest = next(
+        manifest for manifest in manifests if manifest["artifact"]["artifact_type"] == "openhands_replay"
+    )
     assert replay_manifest["payload"]["conversation_id"] == "conversation-1"
     assert replay_manifest["payload"]["execution_status"] == "finished"
     persisted_task = runtime.storage.workflow_repository.get_task(example.launch_payload["task_id"])
@@ -550,7 +553,9 @@ def test_local_runtime_bootstrap_composes_and_dispatches(tmp_path: Path, monkeyp
     assert persisted_graph.workflow_run.status.value == "running"
     assert calls[2]["body"]["agent"]["llm"]["reasoning_effort"] == "none"
     assert calls[2]["body"]["agent"]["llm"]["model"] == "vertex_ai/gemini-3.1-pro-preview"
-    assert '"user_request": "build a clothing storefront"' not in calls[2]["body"]["initial_message"]["content"][0]["text"]
+    assert (
+        '"user_request": "build a clothing storefront"' not in calls[2]["body"]["initial_message"]["content"][0]["text"]
+    )
     assert [entry["path"] for entry in calls] == [
         "/health",
         "/health",
@@ -595,7 +600,9 @@ def test_local_runtime_ignores_recovered_agent_error_when_conversation_finishes_
     assert example.failure_reason is None
     assert example.stream_event_types == ("diagnostic", "complete")
     manifests = [runtime.storage.artifact_store.read_manifest(artifact_id) for artifact_id in example.artifact_ids]
-    replay_manifest = next(manifest for manifest in manifests if manifest["artifact"]["artifact_type"] == "openhands_replay")
+    replay_manifest = next(
+        manifest for manifest in manifests if manifest["artifact"]["artifact_type"] == "openhands_replay"
+    )
     assert replay_manifest["payload"]["execution_status"] == "finished"
 
 
@@ -607,7 +614,9 @@ def test_local_runtime_retries_poll_timeout_before_failing(tmp_path: Path, monke
 
     monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
 
-    def fake_wait_for_conversation(self, conversation_id: str, *, timeout_seconds: float, poll_interval_seconds: float = 1.0):
+    def fake_wait_for_conversation(
+        self, conversation_id: str, *, timeout_seconds: float, poll_interval_seconds: float = 1.0
+    ):
         wait_calls.append(timeout_seconds)
         if len(wait_calls) == 1:
             return replace(
@@ -658,10 +667,14 @@ def test_local_runtime_run_workflow_propagates_request_and_advances_multiple_tas
     assert len(conversation_calls) == 4
     first_prompt = conversation_calls[0]["body"]["initial_message"]["content"][0]["text"]
     assert "Task Input JSON:" in first_prompt
-    assert '"user_request": "Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing."' in first_prompt
+    assert (
+        '"user_request": "Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing."'
+        in first_prompt
+    )
     downstream_prompts = [call["body"]["initial_message"]["content"][0]["text"] for call in conversation_calls[1:]]
     assert all(
-        '"user_request": "Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing."' in prompt
+        '"user_request": "Build a small ecommerce website for clothing brands. Ask for clarification if checkout or product constraints are missing."'
+        in prompt
         for prompt in downstream_prompts
     )
     assert any('"upstream_artifacts"' in prompt for prompt in downstream_prompts)
@@ -681,7 +694,7 @@ def test_local_runtime_persists_memory_and_injects_it_into_downstream_prompts(tm
         )
         memory_entries = runtime.storage.workflow_repository.list_memory_entries("workflow_run", report.workflow_run_id)
 
-    assert any("Manager plan: task completed" == entry.content for entry in memory_entries)
+    assert any(entry.content == "Manager plan: task completed" for entry in memory_entries)
     conversation_calls = [call for call in calls if call["path"] == "/api/conversations"]
     assert len(conversation_calls) == 2
     downstream_prompt = conversation_calls[1]["body"]["initial_message"]["content"][0]["text"]
@@ -698,7 +711,9 @@ def test_local_runtime_projects_lifecycle_events_into_graph_backend(tmp_path: Pa
     with build_local_runtime(root=tmp_path, environ={}, transport=transport) as runtime:
         example = runtime.run_example(dispatch=True)
         projected_events = runtime.storage.graph_projection.list_events()
-        related_entities = runtime.storage.graph_projection.query_related_entities(example.launch_payload["task_id"], depth=8)
+        related_entities = runtime.storage.graph_projection.query_related_entities(
+            example.launch_payload["task_id"], depth=8
+        )
 
     assert projected_events
     assert any(event.event_type == "attempt.opened" for event in projected_events)
@@ -795,7 +810,9 @@ def test_local_runtime_run_workflow_stops_on_human_input_request(tmp_path: Path,
     assert report.step_reports[0].task_state == "waiting_for_human"
 
 
-def test_local_runtime_promotes_manager_semantic_clarification_to_waiting_for_human(tmp_path: Path, monkeypatch) -> None:
+def test_local_runtime_promotes_manager_semantic_clarification_to_waiting_for_human(
+    tmp_path: Path, monkeypatch
+) -> None:
     _prepare_local_root(tmp_path)
     calls: list[dict[str, object]] = []
     transport = _recording_transport(calls)
@@ -831,9 +848,7 @@ def test_local_runtime_promotes_manager_semantic_clarification_to_waiting_for_hu
         )
 
     assert report.dispatched_task_keys == ("manager_plan",)
-    assert report.open_human_questions == (
-        "What exact thing is being booked?\nShould payment be collected upfront?",
-    )
+    assert report.open_human_questions == ("What exact thing is being booked?\nShould payment be collected upfront?",)
     assert report.step_reports[0].attempt_state == "needs_input"
     assert report.step_reports[0].task_state == "waiting_for_human"
 
@@ -877,7 +892,9 @@ def test_local_runtime_ignores_user_echo_when_detecting_manager_semantic_clarifi
                         "tool_name": "finish",
                         "observation": {
                             "kind": "FinishObservation",
-                            "content": [{"type": "text", "text": "Planned the booking app using the resolved clarification."}],
+                            "content": [
+                                {"type": "text", "text": "Planned the booking app using the resolved clarification."}
+                            ],
                         },
                     },
                 ),
@@ -940,7 +957,9 @@ def test_local_runtime_high_autonomy_keeps_manager_moving_on_non_blocking_semant
     assert report.dispatched_task_keys == ("manager_plan",)
     assert report.open_human_questions == ()
     assert report.step_reports[0].task_state == "completed"
-    prompt = next(call for call in calls if call["path"] == "/api/conversations")["body"]["initial_message"]["content"][0]["text"]
+    prompt = next(call for call in calls if call["path"] == "/api/conversations")["body"]["initial_message"]["content"][
+        0
+    ]["text"]
     assert '"autonomy_level": "high"' in prompt
 
 
@@ -1123,7 +1142,9 @@ def test_local_runtime_reuses_answered_semantic_clarification_without_reopening_
     assert initial.open_human_questions == ("What exact thing is being booked?",)
     assert resumed.open_human_questions == ()
     assert resumed.dispatched_task_keys[:2] == ("manager_plan", "manager_plan")
-    assert any(report.task_key == "manager_plan" and report.task_state == "completed" for report in resumed.step_reports)
+    assert any(
+        report.task_key == "manager_plan" and report.task_state == "completed" for report in resumed.step_reports
+    )
     assert len(requests) == 1
     assert requests[0].status.value == "answered"
     conversation_calls = [call for call in calls if call["path"] == "/api/conversations"]
@@ -1238,7 +1259,10 @@ def test_local_runtime_fails_after_duplicate_answered_clarification_loop_limit(t
     assert resumed.open_human_questions == ()
     assert resumed.step_reports[-1].task_key == "manager_plan"
     assert resumed.step_reports[-1].task_state == "failed"
-    assert resumed.step_reports[-1].failure_reason == "duplicate_answered_clarification_loop: What exact thing is being booked?"
+    assert (
+        resumed.step_reports[-1].failure_reason
+        == "duplicate_answered_clarification_loop: What exact thing is being booked?"
+    )
     assert task.state.value == "failed"
     assert any(event.event_type == "attempt.duplicate_answered_clarification_loop" for event in events)
 
@@ -1275,7 +1299,9 @@ def test_local_runtime_waits_for_worker_requested_approval_and_can_resume_after_
                 ),
             },
         )
-        approval_request = runtime.storage.workflow_repository.list_approval_requests_for_run(initial.workflow_run_id)[0]
+        approval_request = runtime.storage.workflow_repository.list_approval_requests_for_run(initial.workflow_run_id)[
+            0
+        ]
         resumed = runtime.resolve_approval_request(
             workflow_run_id=initial.workflow_run_id,
             request_id=approval_request.id,
@@ -1286,7 +1312,9 @@ def test_local_runtime_waits_for_worker_requested_approval_and_can_resume_after_
         )
         updated_request = runtime.storage.workflow_repository.get_approval_request(approval_request.id)
 
-    assert initial.open_approval_reasons == ("Approve the manager plan before I dispatch the downstream implementation work.",)
+    assert initial.open_approval_reasons == (
+        "Approve the manager plan before I dispatch the downstream implementation work.",
+    )
     assert initial.step_reports[0].attempt_state == "paused"
     assert initial.step_reports[0].task_state == "waiting_for_approval"
     assert updated_request.status.value == "approved"
@@ -1387,7 +1415,9 @@ def test_local_runtime_review_requires_validation_evidence_for_approval(tmp_path
     assert decision == "revise"
 
 
-def test_local_runtime_review_accepts_plain_approval_language_with_validation_evidence(tmp_path: Path, monkeypatch) -> None:
+def test_local_runtime_review_accepts_plain_approval_language_with_validation_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
     _prepare_local_root(tmp_path)
     calls: list[dict[str, object]] = []
     transport = _recording_transport(calls)
@@ -1425,17 +1455,13 @@ def test_local_runtime_requires_release_signoff_after_single_review_pass(tmp_pat
                     OpenHandsStreamEvent(
                         event_type="complete",
                         message=(
-                            "REVIEW_DECISION: APPROVE. Validated in browser, build passed, "
-                            "and API smoke test passed."
+                            "REVIEW_DECISION: APPROVE. Validated in browser, build passed, and API smoke test passed."
                         ),
                         artifact={
                             "artifact_type": "review_notes",
                             "title": "Review notes",
                             "summary": (
-                                "REVIEW_DECISION: APPROVE\n"
-                                "Validated in browser.\n"
-                                "Build passed.\n"
-                                "API smoke test passed."
+                                "REVIEW_DECISION: APPROVE\nValidated in browser.\nBuild passed.\nAPI smoke test passed."
                             ),
                             "status": "final",
                             "metadata_json": {"content_type": "text/plain"},
@@ -1515,7 +1541,9 @@ def test_local_runtime_uses_supplied_project_scope_for_memory_isolation(tmp_path
     _prepare_local_root(tmp_path)
     monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
 
-    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-a") as runtime:
+    with build_local_runtime(
+        root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-a"
+    ) as runtime:
         workflow_run_id = runtime.initialize_workflow_run(request="scope a", project_id="orbit-a")
         workflow_run = runtime.storage.workflow_repository.get_workflow_run(workflow_run_id)
         entry = MemoryEntryRecord(
@@ -1529,13 +1557,17 @@ def test_local_runtime_uses_supplied_project_scope_for_memory_isolation(tmp_path
         runtime.storage.workflow_repository.save_memory_entry(entry)
         runtime.storage.memory_store.write(entry)
 
-    with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-b") as runtime:
+    with build_local_runtime(
+        root=tmp_path, environ={}, transport=_recording_transport([]), project_id="orbit-b"
+    ) as runtime:
         workflow_run_id = runtime.initialize_workflow_run(request="scope b", project_id="orbit-b")
         workflow_run = runtime.storage.workflow_repository.get_workflow_run(workflow_run_id)
 
         assert workflow_run.project_id == "orbit-b"
         assert runtime.storage.context_service.list_memory_entries("project", "orbit-b") == []
-        assert [entry.content for entry in runtime.storage.context_service.list_memory_entries("project", "orbit-a")] == ["orbit a memory"]
+        assert [
+            entry.content for entry in runtime.storage.context_service.list_memory_entries("project", "orbit-a")
+        ] == ["orbit a memory"]
 
 
 def test_cli_doctor_and_run_example_use_composed_runtime(tmp_path: Path, monkeypatch) -> None:
@@ -1818,7 +1850,9 @@ def test_local_runtime_retries_empty_response_loop_before_succeeding(tmp_path: P
     assert [attempt.state.value for attempt in attempts] == ["orphaned", "succeeded"]
 
 
-def test_local_runtime_refreshes_finished_conversation_before_marking_stale_running_task(tmp_path: Path, monkeypatch) -> None:
+def test_local_runtime_refreshes_finished_conversation_before_marking_stale_running_task(
+    tmp_path: Path, monkeypatch
+) -> None:
     _prepare_local_root(tmp_path)
     calls: list[dict[str, object]] = []
     transport = _recording_transport(calls)
@@ -1827,7 +1861,9 @@ def test_local_runtime_refreshes_finished_conversation_before_marking_stale_runn
 
     monkeypatch.setattr("autoweave.local_runtime.build_local_storage_wiring", _test_storage_wiring)
 
-    def fake_wait_for_conversation(self, conversation_id: str, *, timeout_seconds: float, poll_interval_seconds: float = 1.0):
+    def fake_wait_for_conversation(
+        self, conversation_id: str, *, timeout_seconds: float, poll_interval_seconds: float = 1.0
+    ):
         response = original_get_conversation(self, conversation_id)
         return replace(
             response,
@@ -1879,9 +1915,7 @@ def test_local_runtime_recovers_running_attempt_without_active_lease_on_restart(
     with build_local_runtime(root=tmp_path, environ={}, transport=_recording_transport([])) as runtime:
         workflow_run_id = runtime.initialize_workflow_run(request="Recover stale lease", project_id="orbit-recovery")
         runtime.orchestration.schedule()
-        manager_task = next(
-            task for task in runtime.orchestration.state.graph.tasks if task.task_key == "manager_plan"
-        )
+        manager_task = next(task for task in runtime.orchestration.state.graph.tasks if task.task_key == "manager_plan")
         attempt = runtime.orchestration.open_attempt(
             task_id=manager_task.id,
             agent_definition_id="manager-agent",

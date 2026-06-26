@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from enum import StrEnum
+import sys
+from datetime import datetime, timezone
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
+
+
 from typing import Any
 from uuid import uuid4
 
@@ -14,7 +24,7 @@ from autoweave.types import JsonDict
 
 
 def utc_now() -> datetime:
-    return datetime.now(tz=UTC)
+    return datetime.now(tz=timezone.utc)
 
 
 def generate_id(prefix: str) -> str:
@@ -185,7 +195,7 @@ class TaskRecord(TimestampedRecord):
     produced_artifact_types_json: list[str] = Field(default_factory=list)
     block_reason: str | None = None
 
-    def transition(self, new_state: TaskState, *, reason: str | None = None) -> "TaskRecord":
+    def transition(self, new_state: TaskState, *, reason: str | None = None) -> TaskRecord:
         allowed = {
             TaskState.CREATED: {TaskState.READY, TaskState.CANCELLED, TaskState.WAITING_FOR_DEPENDENCY},
             TaskState.READY: {
@@ -247,7 +257,7 @@ class TaskAttemptRecord(BaseRecord):
     started_at: datetime | None = None
     ended_at: datetime | None = None
 
-    def transition(self, new_state: AttemptState) -> "TaskAttemptRecord":
+    def transition(self, new_state: AttemptState) -> TaskAttemptRecord:
         allowed = {
             AttemptState.QUEUED: {AttemptState.DISPATCHING, AttemptState.ABORTED},
             AttemptState.DISPATCHING: {AttemptState.RUNNING, AttemptState.ERRORED, AttemptState.ORPHANED},
@@ -267,9 +277,7 @@ class TaskAttemptRecord(BaseRecord):
             AttemptState.ORPHANED: set(),
         }
         if new_state not in allowed[self.state]:
-            raise StateTransitionError(
-                f"attempt transition {self.state.value} -> {new_state.value} is not allowed"
-            )
+            raise StateTransitionError(f"attempt transition {self.state.value} -> {new_state.value} is not allowed")
         return self.model_copy(update={"state": new_state})
 
 
@@ -410,7 +418,7 @@ class WorkflowGraph(BaseRecord):
     edges: list[TaskEdgeRecord]
 
     @model_validator(mode="after")
-    def validate_edges(self) -> "WorkflowGraph":
+    def validate_edges(self) -> WorkflowGraph:
         task_ids = {task.id for task in self.tasks}
         for edge in self.edges:
             if edge.from_task_id not in task_ids or edge.to_task_id not in task_ids:
