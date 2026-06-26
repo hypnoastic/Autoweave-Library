@@ -33,13 +33,13 @@ AutoWeave is the **execution engine** for multi-agent software engineering teams
 
 ### Key Features
 
-- 🔀 **Workflow Orchestration** — Define, compile, and execute DAGs of agentic tasks with dependency-aware dynamic scheduling
-- 💾 **Durable State** — Resume paused runs, track attempts, persist context safely across PostgreSQL
-- 🤝 **Human-in-the-Loop** — Native primitives for pausing execution to request approvals or clarifications
-- 📋 **Queue Dispatch** — Offload long-running tasks to Celery workers backed by Redis
-- 🔍 **Local Monitoring** — Inspect runs via a lightweight local dashboard and playground
-- 🧠 **Context Layered Resolution** — Workspace → Postgres → pgvector → Artifact Store → Neo4j → Redis → typed miss escalation
-- 📊 **Observability** — OpenTelemetry-compatible spans, metrics, and domain events
+- **Workflow Orchestration** — Define, compile, and execute DAGs of agentic tasks with dependency-aware dynamic scheduling
+- **Durable State** — Resume paused runs, track attempts, persist context safely across PostgreSQL
+- **Human-in-the-Loop** — Native primitives for pausing execution to request approvals or clarifications
+- **Queue Dispatch** — Offload long-running tasks to Celery workers backed by Redis
+- **Local Monitoring** — Inspect runs via a lightweight local dashboard and playground
+- **Context Layered Resolution** — Workspace → Postgres → pgvector → Artifact Store → Neo4j → Redis → typed miss escalation
+- **Observability** — OpenTelemetry-compatible spans, metrics, and domain events
 
 ---
 
