@@ -66,6 +66,7 @@ jobs:
           name: coverage-report
           path: .coverage
           retention-days: 14
+          include-hidden-files: true
 
   package:
     name: Build & Smoke Test
