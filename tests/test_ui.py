@@ -38,12 +38,12 @@ def test_ui_navigation_and_docs(dashboard_server: str, page: Page) -> None:
     page.goto(dashboard_server)
 
     # By default, we should be on the overview page
-    expect(page).to_have_title("AutoWeave Library | Documentation & Playground")
+    expect(page).to_have_title("AutoWeave Library | Console")
     expect(page.locator("text=AutoWeave Library").first).to_be_visible()
 
-    # Navigate to Installation
-    page.click("text=Installation")
-    expect(page.locator("h1", has_text="Installation")).to_be_visible()
+    # Navigate to Getting Started
+    page.click("text=Getting Started")
+    expect(page.locator("h1", has_text="Getting Started")).to_be_visible()
 
     # Navigate to API Reference
     page.click("text=API Reference")
@@ -55,11 +55,11 @@ def test_ui_playground_view(dashboard_server: str, page: Page) -> None:
     """Verify that the playground / monitoring view mounts correctly."""
     page.goto(dashboard_server)
 
-    # Click on the Playground / Demo nav item
-    page.click("text=Playground / Demo")
+    # Click on the Playground nav item
+    page.click("text=Playground")
 
     # Wait for the playground content to become visible
-    playground = page.locator("#playground-content")
+    playground = page.locator("#page-playground")
     expect(playground).not_to_have_class("hidden", timeout=5000)
 
     # Verify Manager Chat pane exists
