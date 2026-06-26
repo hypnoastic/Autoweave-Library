@@ -23,14 +23,23 @@ Currently, the `main` branch and the latest published version are supported for 
 ### Security Defenses
 * **Strict Validation**: All state transitions and payload schemas are strictly validated using `pydantic`.
 * **No `eval()`**: The library deliberately avoids unsafe dynamic code execution methods such as `eval()` or `exec()` internally.
-* **Secret Scanning**: All commits to this repository are scanned for hardcoded secrets via GitHub Advanced Security.
+* **Secret Scanning**: All commits to this repository are scanned for hardcoded secrets via `gitleaks`.
 * **Dependency Audits**: Dependencies are continuously audited using `pip-audit`.
 * **Static Analysis**: CodeQL runs on every pull request to analyze the Python source code for logic vulnerabilities.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within AutoWeave Library, please DO NOT open a public issue.
+If you discover a security vulnerability within AutoWeave Library, please **DO NOT** open a public issue.
 
-Instead, please send an email to the security contact listed in the repository or use the GitHub Security Advisory feature to privately report the issue.
+Instead, please use the **GitHub Security Advisory** feature to privately report the issue:
+1. Go to the [Security Advisories tab](https://github.com/hypnoastic/Autoweave/security/advisories) for the repository.
+2. Click "Report a vulnerability".
+3. Provide full details of the vulnerability, including steps to reproduce.
 
-All security vulnerabilities will be promptly addressed.
+### Response Timeline
+
+* We will acknowledge receipt of your vulnerability report within **48 hours**.
+* We will provide a status update or resolution plan within **7 days**.
+* If a fix is required, we aim to release a patch within **14 days** of the report.
+
+All security vulnerabilities will be promptly addressed, and reporters will receive credit if they desire.
