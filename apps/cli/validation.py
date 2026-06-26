@@ -8,8 +8,8 @@ from typing import Any
 
 import yaml
 
+from apps.cli.bootstrap import AGENT_ROLES, RUNTIME_FILES, WORKFLOW_FILE, expected_repository_files
 from autoweave.templates import sample_project
-from apps.cli.bootstrap import AGENT_ROLES, RUNTIME_FILES, ROUTING_FILE, WORKFLOW_FILE, expected_repository_files
 
 
 @dataclass(frozen=True)
@@ -83,9 +83,15 @@ def _validate_yaml_contracts(root: Path) -> list[str]:
             )
 
     runtime_issues = _require_yaml_keys(root / RUNTIME_FILES[0], root, {"default_concurrency"})
-    storage_issues = _require_yaml_keys(root / RUNTIME_FILES[1], root, {"postgres_dsn_name", "redis_dsn_name", "neo4j_dsn_name"})
-    vertex_issues = _require_yaml_keys(root / RUNTIME_FILES[2], root, {"provider_name", "profile_definitions", "fallback_order"})
-    observability_issues = _require_yaml_keys(root / RUNTIME_FILES[3], root, {"event_retention_policy", "otlp_exporter_config"})
+    storage_issues = _require_yaml_keys(
+        root / RUNTIME_FILES[1], root, {"postgres_dsn_name", "redis_dsn_name", "neo4j_dsn_name"}
+    )
+    vertex_issues = _require_yaml_keys(
+        root / RUNTIME_FILES[2], root, {"provider_name", "profile_definitions", "fallback_order"}
+    )
+    observability_issues = _require_yaml_keys(
+        root / RUNTIME_FILES[3], root, {"event_retention_policy", "otlp_exporter_config"}
+    )
     issues.extend(runtime_issues)
     issues.extend(storage_issues)
     issues.extend(vertex_issues)

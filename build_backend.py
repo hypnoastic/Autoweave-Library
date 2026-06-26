@@ -9,10 +9,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import tempfile
-import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parent
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -29,22 +33,22 @@ class WheelFile:
     data: bytes
 
 
-def get_requires_for_build_wheel(config_settings=None):  # noqa: D401, ANN001
+def get_requires_for_build_wheel(config_settings=None):
     return []
 
 
-def get_requires_for_build_editable(config_settings=None):  # noqa: D401, ANN001
+def get_requires_for_build_editable(config_settings=None):
     return []
 
 
-def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):  # noqa: D401, ANN001
+def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
     metadata_dir = Path(metadata_directory) / DIST_INFO
     metadata_dir.mkdir(parents=True, exist_ok=True)
     _write_metadata_files(metadata_dir)
     return DIST_INFO
 
 
-def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):  # noqa: D401, ANN001
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     wheel_path = Path(wheel_directory) / WHEEL_NAME
     files = _collect_wheel_files()
 
@@ -56,13 +60,13 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             record_lines.append(f"{wheel_file.arcname},sha256={digest},{len(wheel_file.data)}")
 
         record_name = f"{DIST_INFO}/RECORD"
-        record_data = ("\n".join(record_lines + [f"{record_name},,"]) + "\n").encode("utf-8")
+        record_data = ("\n".join([*record_lines, f"{record_name},,"]) + "\n").encode("utf-8")
         archive.writestr(record_name, record_data)
 
     return wheel_path.name
 
 
-def build_editable(wheel_directory, config_settings=None, metadata_directory=None):  # noqa: D401, ANN001
+def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
     wheel_path = Path(wheel_directory) / WHEEL_NAME
     files = _collect_editable_wheel_files()
 
@@ -74,13 +78,13 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
             record_lines.append(f"{wheel_file.arcname},sha256={digest},{len(wheel_file.data)}")
 
         record_name = f"{DIST_INFO}/RECORD"
-        record_data = ("\n".join(record_lines + [f"{record_name},,"]) + "\n").encode("utf-8")
+        record_data = ("\n".join([*record_lines, f"{record_name},,"]) + "\n").encode("utf-8")
         archive.writestr(record_name, record_data)
 
     return wheel_path.name
 
 
-def build_sdist(sdist_directory, config_settings=None):  # noqa: D401, ANN001
+def build_sdist(sdist_directory, config_settings=None):
     sdist_path = Path(sdist_directory) / f"{NAME}-{VERSION}.tar.gz"
     with tempfile.TemporaryDirectory() as tmpdir:
         staging = Path(tmpdir) / f"{NAME}-{VERSION}"
@@ -89,7 +93,15 @@ def build_sdist(sdist_directory, config_settings=None):  # noqa: D401, ANN001
             source = ROOT / relative
             if source.exists():
                 _copy_tree(source, staging / relative)
-        for relative in ("pyproject.toml", "README.md", "build_backend.py", ".gitignore", ".dockerignore", "Dockerfile", "docker-compose.yml"):
+        for relative in (
+            "pyproject.toml",
+            "README.md",
+            "build_backend.py",
+            ".gitignore",
+            ".dockerignore",
+            "Dockerfile",
+            "docker-compose.yml",
+        ):
             source = ROOT / relative
             if source.exists():
                 (staging / relative).write_bytes(source.read_bytes())
@@ -117,12 +129,7 @@ def _collect_wheel_files() -> list[WheelFile]:
             ),
             WheelFile(
                 arcname=f"{DIST_INFO}/WHEEL",
-                data=(
-                    "Wheel-Version: 1.0\n"
-                    "Generator: build_backend\n"
-                    "Root-Is-Purelib: true\n"
-                    "Tag: py3-none-any\n"
-                ).encode("utf-8"),
+                data=(b"Wheel-Version: 1.0\nGenerator: build_backend\nRoot-Is-Purelib: true\nTag: py3-none-any\n"),
             ),
             WheelFile(
                 arcname=f"{DIST_INFO}/entry_points.txt",
@@ -149,12 +156,7 @@ def _collect_editable_wheel_files() -> list[WheelFile]:
             ),
             WheelFile(
                 arcname=f"{DIST_INFO}/WHEEL",
-                data=(
-                    "Wheel-Version: 1.0\n"
-                    "Generator: build_backend\n"
-                    "Root-Is-Purelib: true\n"
-                    "Tag: py3-none-any\n"
-                ).encode("utf-8"),
+                data=(b"Wheel-Version: 1.0\nGenerator: build_backend\nRoot-Is-Purelib: true\nTag: py3-none-any\n"),
             ),
             WheelFile(
                 arcname=f"{DIST_INFO}/entry_points.txt",
