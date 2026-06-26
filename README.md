@@ -69,7 +69,7 @@ flowchart TD
 4. **Human intervention is first-class** — Clarifications, approvals, and overrides are formal workflow objects
 5. **One sandbox per task attempt** — Isolated worktree per execution
 
-> 📖 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture specification.
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete architecture specification.
 
 ---
 
@@ -207,7 +207,7 @@ See [`.env.example`](.env.example) for all configuration options. Key variables:
 | `NEO4J_URL` | Neo4j connection URL | — |
 | `OPENHANDS_AGENT_SERVER_BASE_URL` | OpenHands server URL | `http://127.0.0.1:8000` |
 
-> 📖 See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
+> See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
 
 ---
 
@@ -241,7 +241,7 @@ make test:integration
 make test:ui
 ```
 
-> 📖 See [TESTING.md](TESTING.md) for the full testing philosophy and guidelines.
+> See [TESTING.md](TESTING.md) for the full testing philosophy and guidelines.
 
 ---
 
