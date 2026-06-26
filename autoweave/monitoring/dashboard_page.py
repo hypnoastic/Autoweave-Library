@@ -293,29 +293,29 @@ AutoWeave Library is published as a Python package.
 
 ### Prerequisites
 * Python >= 3.10
-* A local environment map (e.g. \`.env.local\`) containing your Vertex AI, Postgres, Redis, and Neo4j connection URIs if running the full persistent stack.
+* A local environment map (e.g. \\`.env.local\\`) containing your Vertex AI, Postgres, Redis, and Neo4j connection URIs if running the full persistent stack.
 
 ### Install via pip
 
-\`\`\`bash
+\\`\\`\\`bash
 pip install autoweave
-\`\`\`
+\\`\\`\\`
 
 ### Install via uv (Recommended)
 
-\`\`\`bash
+\\`\\`\\`bash
 uv pip install autoweave
-\`\`\`
+\\`\\`\\`
 
 ### For Local Development
 
 Clone the repository and install it in editable mode with development dependencies:
 
-\`\`\`bash
+\\`\\`\\`bash
 git clone https://github.com/autoweave/autoweave-library.git
 cd autoweave-library
 uv pip install -e ".[dev]"
-\`\`\`
+\\`\\`\\`
         `,
         'quickstart': `
 # Quick Start
@@ -326,28 +326,28 @@ Here is a minimal example of booting the local runtime and executing a workflow.
 
 AutoWeave requires a project directory to store local configurations.
 
-\`\`\`bash
+\\`\\`\\`bash
 autoweave new-project ./my-weave-project
 autoweave bootstrap --root ./my-weave-project
-\`\`\`
+\\`\\`\\`
 
 ### 2. Run a Simple Workflow
 
-\`\`\`bash
+\\`\\`\\`bash
 autoweave run-workflow \\
     --root ./my-weave-project \\
     --request "Write a script that prints Hello World"
-\`\`\`
+\\`\\`\\`
 
 ### 3. Start the Monitoring UI
 
 You can view the execution state, DAG, and manager chat locally:
 
-\`\`\`bash
+\\`\\`\\`bash
 autoweave ui --root ./my-weave-project
-\`\`\`
+\\`\\`\\`
 
-Navigate to \`http://localhost:8765\` to see this exact interface.
+Navigate to \\`http://localhost:8765\\` to see this exact interface.
         `,
         'core-concepts': `
 # Core Concepts
@@ -355,16 +355,16 @@ Navigate to \`http://localhost:8765\` to see this exact interface.
 AutoWeave separates the **Product Shell** from the **Runtime Engine**. This library *is* the Runtime Engine.
 
 ### 1. Workflow Compiler
-User requests are passed to the \`compiler\`. It takes a natural language request, grounds it in repository context (Neo4j/Vector DB), and emits an execution DAG of \`Tasks\`.
+User requests are passed to the \\`compiler\\`. It takes a natural language request, grounds it in repository context (Neo4j/Vector DB), and emits an execution DAG of \\`Tasks\\`.
 
 ### 2. Execution DAG & Tasks
-Workflows are modeled as a DAG. Each \`Task\` is routed to an assigned \`role\` (e.g., Code Writer, QA Reviewer).
+Workflows are modeled as a DAG. Each \\`Task\\` is routed to an assigned \\`role\\` (e.g., Code Writer, QA Reviewer).
 
 ### 3. Workers & Queues
-If \`dispatch=True\` and \`--queue\` is used, tasks are serialized and sent to a **Celery Worker**. The worker deserializes the task, provisions an OpenHands remote runtime, and executes.
+If \\`dispatch=True\\` and \\`--queue\\` is used, tasks are serialized and sent to a **Celery Worker**. The worker deserializes the task, provisions an OpenHands remote runtime, and executes.
 
 ### 4. Human Approval Pauses
-When an agent determines it needs human input, it emits an \`ApprovalRequest\`. The runtime pauses the task. The web layer (or local UI) captures this and prompts the user. Responding to the request resumes the execution DAG automatically.
+When an agent determines it needs human input, it emits an \\`ApprovalRequest\\`. The runtime pauses the task. The web layer (or local UI) captures this and prompts the user. Responding to the request resumes the execution DAG automatically.
 
 ### 5. Durable State
 Every run, task, attempt, event, and artifact is persisted to Postgres/SQLite natively.
@@ -376,7 +376,7 @@ Every run, task, attempt, event, and artifact is persisted to Postgres/SQLite na
 
 You do not have to use the CLI. Downstream backends will instantiate the runtime directly:
 
-\`\`\`python
+\\`\\`\\`python
 from autoweave.orchestration.runtime import build_local_runtime
 
 # Initialize the runtime
@@ -388,11 +388,11 @@ workflow_run = runtime.launch_workflow(
 )
 
 print(f"Started run: {workflow_run.id}")
-\`\`\`
+\\`\\`\\`
 
 ### Resolving Approvals
 
-\`\`\`python
+\\`\\`\\`python
 from autoweave.approvals.service import resolve_approval_request
 
 # Approved by a human from a web dashboard
@@ -402,27 +402,27 @@ resolve_approval_request(
     approved=True,
     runtime=runtime
 )
-\`\`\`
+\\`\\`\\`
         `,
         'api-reference': `
 # API Reference
 
 AutoWeave exposes a minimal public surface area for external Python consumption.
 
-### \`build_local_runtime(root_path: Path) -> LocalRuntime\`
+### \\`build_local_runtime(root_path: Path) -> LocalRuntime\\`
 Constructs the full dependency-injected runtime engine. Requires a configured `.env.local` inside the `root_path`.
 
-### \`bootstrap_project(root_path: Path) -> None\`
+### \\`bootstrap_project(root_path: Path) -> None\\`
 Scaffolds the necessary fixtures, local DB structure, and template files into a target directory.
 
-### \`migrate_project(root_path: Path) -> None\`
+### \\`migrate_project(root_path: Path) -> None\\`
 Refreshes template-managed files to newer packaged defaults if the library version is updated.
 
-### \`load_env_map(root_path: Path) -> dict\`
-Loads and merges the local environment variables cleanly, respecting standard \`.env\` hierarchies.
+### \\`load_env_map(root_path: Path) -> dict\\`
+Loads and merges the local environment variables cleanly, respecting standard \\`.env\\` hierarchies.
 
-### \`AttemptState\` / \`TaskState\`
-Enums representing the durable lifecycle states of workflow nodes. Valid states include \`pending\`, \`running\`, \`paused\`, \`succeeded\`, \`failed\`.
+### \\`AttemptState\\` / \\`TaskState\\`
+Enums representing the durable lifecycle states of workflow nodes. Valid states include \\`pending\\`, \\`running\\`, \\`paused\\`, \\`succeeded\\`, \\`failed\\`.
         `,
         'testing': `
 # Testing & Quality
@@ -435,16 +435,16 @@ We enforce a strict **80%+ overall line coverage** threshold. Pull requests fail
 ### Test Matrix
 
 1. **Unit Tests**: Validates compilation, template generation, and state machine transitions.
-2. **Integration Tests**: Tests full orchestration loops via \`test_orchestration.py\` using mock worker executors.
-3. **Queue/Celery Tests**: Validates \`test_celery_queue.py\` behavior.
-4. **Storage Tests**: \`test_storage_durable.py\` verifies Postgres/SQLite persistence schemas.
+2. **Integration Tests**: Tests full orchestration loops via \\`test_orchestration.py\\` using mock worker executors.
+3. **Queue/Celery Tests**: Validates \\`test_celery_queue.py\\` behavior.
+4. **Storage Tests**: \\`test_storage_durable.py\\` verifies Postgres/SQLite persistence schemas.
 5. **UI / Documentation Tests**: Headless browser tests (Playwright) ensure this local dashboard functions flawlessly.
-6. **Package Smoke Tests**: Verifies \`pip install\` works from the compiled `.whl` and entrypoints execute without \`ImportError\`.
+6. **Package Smoke Tests**: Verifies \\`pip install\\` works from the compiled `.whl` and entrypoints execute without \\`ImportError\\`.
 
 Run locally:
-\`\`\`bash
+\\`\\`\\`bash
 pytest tests/ -v
-\`\`\`
+\\`\\`\\`
         `,
         'security': `
 # Security
@@ -454,34 +454,34 @@ As a runtime engine executing agent-generated commands, security is paramount.
 ### Threat Model
 * **Trusted Environments**: AutoWeave runs in trusted environments (developer laptops, backend clusters). 
 * **Worker Isolation**: Remote workers (OpenHands) must run inside sandboxed environments (Docker/gVisor). AutoWeave orchestrates them but *does not* provide the sandbox itself.
-* **Dependencies**: Automated dependency audits via \`pip-audit\`.
+* **Dependencies**: Automated dependency audits via \\`pip-audit\\`.
 
 ### Validations
-* Input validation is strictly enforced via \`pydantic\` for all runtime state models.
-* No unsafe \`eval()\` or \`exec()\` is used within the Python orchestration layer.
+* Input validation is strictly enforced via \\`pydantic\\` for all runtime state models.
+* No unsafe \\`eval()\\` or \\`exec()\\` is used within the Python orchestration layer.
 * CodeQL static analysis runs on every pull request.
 
 ### Local Credentials
-AutoWeave uses `.env.local` for credentials. It explicitly \`.gitignore\`s these files during `bootstrap`.
+AutoWeave uses `.env.local` for credentials. It explicitly \\`.gitignore\\`s these files during `bootstrap`.
         `,
         'cicd': `
 # CI/CD
 
 AutoWeave uses GitHub Actions for continuous integration and delivery.
 
-### 1. \`ci.yml\` (Pull Requests & Main)
-* **Linting**: \`ruff check\` and \`ruff format\`
-* **Typechecking**: \`mypy\` strictly enforced
-* **Tests**: \`pytest\` and \`pytest-cov\`
-* **Build**: \`python -m build\`
-* **Smoke Test**: Installs the `.whl` into an isolated virtualenv and tests \`autoweave --help\`.
+### 1. \\`ci.yml\\` (Pull Requests & Main)
+* **Linting**: \\`ruff check\\` and \\`ruff format\\`
+* **Typechecking**: \\`mypy\\` strictly enforced
+* **Tests**: \\`pytest\\` and \\`pytest-cov\\`
+* **Build**: \\`python -m build\\`
+* **Smoke Test**: Installs the `.whl` into an isolated virtualenv and tests \\`autoweave --help\\`.
 
-### 2. \`security.yml\` (Pull Requests, Main, Schedule)
+### 2. \\`security.yml\\` (Pull Requests, Main, Schedule)
 * **Pip Audit**: Scans dependencies for known vulnerabilities.
 * **CodeQL**: Runs GitHub's static analyzer for Python vulnerabilities.
 * **Secret Scanning**: Rejects commits containing hardcoded secrets.
 
-### 3. \`release.yml\` (Tags)
+### 3. \\`release.yml\\` (Tags)
 * Validates full CI suite.
 * Publishes to PyPI using **Trusted Publishing (OIDC)**, completely removing the need for long-lived repository secrets.
         `
@@ -633,7 +633,7 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
         nodes.chatThread.scrollTop = nodes.chatThread.scrollHeight;
 
         const hr = openHumanRequest(run);
-        nodes.composerHint.textContent = hr ? \`Answering clarification: \${hr.question}\` : "";
+        nodes.composerHint.textContent = hr ? \\`Answering clarification: \\${hr.question}\\` : "";
     }
 
     function renderExecution(run) {
@@ -670,7 +670,7 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
         }
 
         const tasks = run.tasks || [];
-        nodes.taskCount.textContent = \`\${tasks.length} tasks\`;
+        nodes.taskCount.textContent = \\`\\${tasks.length} tasks\\`;
 
         let tasksHtml = "";
         tasks.forEach(task => {
@@ -699,16 +699,16 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
             }
 
             tasksHtml += `
-            <div class="p-3 flex items-start gap-3 \${taskBg} relative">
-                <div class="mt-0.5"><span class="material-symbols-outlined \${iconClass}" style="font-size: 16px;">\${icon}</span></div>
+            <div class="p-3 flex items-start gap-3 \\${taskBg} relative">
+                <div class="mt-0.5"><span class="material-symbols-outlined \\${iconClass}" style="font-size: 16px;">\\${icon}</span></div>
                 <div class="flex-1 min-w-0">
                     <div class="flex items-center justify-between gap-2">
-                        <h4 class="text-xs font-semibold text-textMain truncate">\${escapeHtml(task.title || task.task_key)}</h4>
-                        <span class="text-[10px] font-mono font-bold uppercase tracking-wider \${stateColor}">\${stateLabel}</span>
+                        <h4 class="text-xs font-semibold text-textMain truncate">\\${escapeHtml(task.title || task.task_key)}</h4>
+                        <span class="text-[10px] font-mono font-bold uppercase tracking-wider \\${stateColor}">\\${stateLabel}</span>
                     </div>
-                    <p class="text-[11px] text-textMuted mt-1 line-clamp-2">\${escapeHtml(task.worker_summary || "No description")}</p>
+                    <p class="text-[11px] text-textMuted mt-1 line-clamp-2">\\${escapeHtml(task.worker_summary || "No description")}</p>
                     <div class="mt-2 flex items-center gap-2">
-                        <span class="px-1.5 py-0.5 rounded-sm bg-borderSubtle/50 text-textMuted font-mono text-[9px] uppercase border border-borderSubtle">\${escapeHtml(task.task_key)}</span>
+                        <span class="px-1.5 py-0.5 rounded-sm bg-borderSubtle/50 text-textMuted font-mono text-[9px] uppercase border border-borderSubtle">\\${escapeHtml(task.task_key)}</span>
                     </div>
                 </div>
             </div>`;
@@ -733,7 +733,7 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
 
     async function postJson(path, payload) {
         const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        if (!response.ok) throw new Error(await response.text() || \`\${path} failed\`);
+        if (!response.ok) throw new Error(await response.text() || \\`\\${path} failed\\`);
         return await response.json();
     }
 
@@ -771,7 +771,7 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
             });
             await loadState();
         } catch (error) {
-            nodes.composerHint.textContent = \`Error: \${error.message}\`;
+            nodes.composerHint.textContent = \\`Error: \\${error.message}\\`;
         }
     };
 
@@ -795,7 +795,7 @@ AutoWeave uses GitHub Actions for continuous integration and delivery.
             nodes.composerHint.textContent = "";
             await loadState();
         } catch (error) {
-            nodes.composerHint.textContent = \`Error: \${error.message}\`;
+            nodes.composerHint.textContent = \\`Error: \\${error.message}\\`;
         } finally {
             nodes.composerSubmit.disabled = false;
         }

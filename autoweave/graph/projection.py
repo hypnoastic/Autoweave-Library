@@ -65,7 +65,11 @@ class InMemoryGraphProjectionBackend:
             )
 
     def query_related_entities(self, entity_id: str, depth: int = 1) -> list[dict[str, str]]:
-        matches = [relation for relation in self._relations if relation.source_id == entity_id or relation.target_id == entity_id]
+        matches = [
+            relation
+            for relation in self._relations
+            if relation.source_id == entity_id or relation.target_id == entity_id
+        ]
         return [
             {
                 "source_id": relation.source_id,

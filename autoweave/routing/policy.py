@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from autoweave.config_models import VertexConfig, VertexProfileConfig
 from autoweave.models import ModelRouteRecord, TaskAttemptRecord, TaskRecord

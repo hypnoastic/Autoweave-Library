@@ -1,0 +1,10 @@
+# AutoWeave Code Owners
+
+# Default owner for everything
+*       @hypnoastic
+
+# Specific subsystems (examples, can be expanded as team grows)
+/autoweave/orchestration/   @hypnoastic
+/autoweave/storage/         @hypnoastic
+/autoweave/monitoring/      @hypnoastic
+/docs/                      @hypnoastic

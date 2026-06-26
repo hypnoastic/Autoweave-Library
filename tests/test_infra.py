@@ -72,15 +72,13 @@ def test_docker_assets_exist_for_runtime_container() -> None:
 
 
 def test_repo_contains_library_ci_workflow() -> None:
-    workflow_path = Path(".github/workflows/library-ci.yml")
+    workflow_path = Path(".github/workflows/ci.yml")
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
 
     assert workflow_path.exists()
-    assert workflow["name"] == "Library CI"
-    assert set(workflow["jobs"]) == {"test", "build-wheel"}
-    assert workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"] == ["3.10", "3.11"]
-    assert workflow["jobs"]["test"]["steps"][-1]["run"] == "python -m pytest tests -q"
-    assert workflow["jobs"]["build-wheel"]["steps"][-1]["run"] == "python -m build --wheel --no-isolation"
+    assert workflow["name"] == "CI"
+    assert set(workflow["jobs"]) == {"lint-format-typecheck", "test", "package", "health-report"}
+    assert workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"] == ["3.10", "3.11", "3.12"]
 
 
 def test_repo_contains_commit_push_guidelines() -> None:

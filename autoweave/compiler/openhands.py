@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from autoweave.config_models import RuntimeConfig, VertexConfig
+from autoweave.config_models import VertexConfig
 from autoweave.models import ModelRouteRecord, TaskAttemptRecord, TaskRecord
 from autoweave.types import JsonDict
 from autoweave.workers.runtime import WorkspacePolicy, build_vertex_worker_env

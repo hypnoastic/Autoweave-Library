@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
-from dataclasses import dataclass
 import json
-from typing import Any, Mapping
+from collections import defaultdict, deque
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 import yaml
 
@@ -50,14 +51,8 @@ def build_workflow_topology(definition: WorkflowDefinitionConfig) -> WorkflowTop
     _validate_dependency_references(task_templates)
     _validate_acyclic(task_templates)
 
-    hard_dependencies = {
-        template.key: tuple(template.hard_dependencies)
-        for template in definition.task_templates
-    }
-    soft_dependencies = {
-        template.key: tuple(template.soft_dependencies)
-        for template in definition.task_templates
-    }
+    hard_dependencies = {template.key: tuple(template.hard_dependencies) for template in definition.task_templates}
+    soft_dependencies = {template.key: tuple(template.soft_dependencies) for template in definition.task_templates}
     topological_order = tuple(_topological_order(task_templates))
     return WorkflowTopology(
         definition=definition,
@@ -257,9 +252,7 @@ def _validate_dependency_references(task_templates: dict[str, TaskTemplateConfig
     for template in task_templates.values():
         for dependency_key in (*template.hard_dependencies, *template.soft_dependencies):
             if dependency_key not in task_templates:
-                raise ValueError(
-                    f"task {template.key!r} references unknown dependency {dependency_key!r}"
-                )
+                raise ValueError(f"task {template.key!r} references unknown dependency {dependency_key!r}")
 
 
 def _validate_acyclic(task_templates: dict[str, TaskTemplateConfig]) -> None:
@@ -276,7 +269,7 @@ def _validate_acyclic(task_templates: dict[str, TaskTemplateConfig]) -> None:
             return
         if node in temp_mark:
             cycle_start = path.index(node)
-            cycle = path[cycle_start:] + [node]
+            cycle = [*path[cycle_start:], node]
             raise ValueError(f"workflow graph contains a cycle: {' -> '.join(cycle)}")
         temp_mark.add(node)
         path.append(node)
@@ -325,9 +318,6 @@ def _render_template(template: str, values: Mapping[str, Any]) -> str:
     if not values:
         return template
     rendered_values = _SafeTemplateDict(
-        {
-            key: value if isinstance(value, str) else json.dumps(value, sort_keys=True)
-            for key, value in values.items()
-        }
+        {key: value if isinstance(value, str) else json.dumps(value, sort_keys=True) for key, value in values.items()}
     )
     return template.format_map(rendered_values)

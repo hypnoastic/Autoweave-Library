@@ -23,11 +23,15 @@ class WorkflowScheduler:
         for task_id in state.dependency_view().topological_order:
             task = state.tasks_by_id[task_id]
             reasons = state.task_readiness_reasons(task.id)
-            is_runnable = task.state in {
-                TaskState.CREATED,
-                TaskState.WAITING_FOR_DEPENDENCY,
-                TaskState.READY,
-            } and not reasons
+            is_runnable = (
+                task.state
+                in {
+                    TaskState.CREATED,
+                    TaskState.WAITING_FOR_DEPENDENCY,
+                    TaskState.READY,
+                }
+                and not reasons
+            )
             readiness.append(
                 TaskReadiness(
                     task_id=task.id,
