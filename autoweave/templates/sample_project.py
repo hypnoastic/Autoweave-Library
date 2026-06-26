@@ -281,10 +281,7 @@ def render_agent_skill_markdown(role: str, filename: str) -> str:
             "- If revision is needed, provide detailed backend, frontend, and integration fixes in one pass.\n"
             "- Assume the workflow will rework once from your notes and will not request a second review pass.\n"
         )
-    return (
-        f"# {role.title()} Skill\n\n"
-        "Use this file as the role-specific delivery checklist.\n"
-    )
+    return f"# {role.title()} Skill\n\nUse this file as the role-specific delivery checklist.\n"
 
 
 def render_agent_skill_files(role: str) -> dict[Path, str]:

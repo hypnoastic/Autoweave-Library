@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,9 +17,7 @@ class EventStore(Protocol):
 
     def list_events(self, workflow_run_id: str) -> list[EventRecord]: ...
 
-    def replay_from(
-        self, workflow_run_id: str, cursor: EventCursor | None = None
-    ) -> list[EventRecord]: ...
+    def replay_from(self, workflow_run_id: str, cursor: EventCursor | None = None) -> list[EventRecord]: ...
 
     def latest_cursor(self, workflow_run_id: str) -> EventCursor | None: ...
 
@@ -40,9 +38,7 @@ class InMemoryEventStore:
     def list_events(self, workflow_run_id: str) -> list[EventRecord]:
         return list(self._events.get(workflow_run_id, []))
 
-    def replay_from(
-        self, workflow_run_id: str, cursor: EventCursor | None = None
-    ) -> list[EventRecord]:
+    def replay_from(self, workflow_run_id: str, cursor: EventCursor | None = None) -> list[EventRecord]:
         events = self.list_events(workflow_run_id)
         if cursor is None:
             return events
@@ -82,9 +78,7 @@ class LiveEventStream:
     def __init__(self, store: EventStore) -> None:
         self._store = store
 
-    def snapshot(
-        self, workflow_run_id: str, *, cursor: EventCursor | None = None
-    ) -> EventStreamSnapshot:
+    def snapshot(self, workflow_run_id: str, *, cursor: EventCursor | None = None) -> EventStreamSnapshot:
         events = self._store.replay_from(workflow_run_id, cursor)
         latest_cursor = self._store.latest_cursor(workflow_run_id)
         return EventStreamSnapshot(
@@ -93,13 +87,8 @@ class LiveEventStream:
             events=events,
         )
 
-    def replay(
-        self, workflow_run_id: str, *, cursor: EventCursor | None = None
-    ) -> list[EventRecord]:
+    def replay(self, workflow_run_id: str, *, cursor: EventCursor | None = None) -> list[EventRecord]:
         return self._store.replay_from(workflow_run_id, cursor)
 
-    def iter_from(
-        self, workflow_run_id: str, *, cursor: EventCursor | None = None
-    ) -> Iterable[EventRecord]:
+    def iter_from(self, workflow_run_id: str, *, cursor: EventCursor | None = None) -> Iterable[EventRecord]:
         return iter(self._store.replay_from(workflow_run_id, cursor))
-

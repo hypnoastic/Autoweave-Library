@@ -20,4 +20,3 @@ class ArtifactHandle:
     checksum: str
     size_bytes: int
     content_type: str = "application/octet-stream"
-

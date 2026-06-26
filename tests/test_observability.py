@@ -59,15 +59,9 @@ def test_event_service_redacts_secret_payloads_before_persistence() -> None:
 
 def test_live_event_stream_recovers_from_cursor() -> None:
     service = EventService()
-    service.publish(
-        make_event(workflow_run_id="run_1", event_type="task.ready", source="scheduler", sequence_no=1)
-    )
-    service.publish(
-        make_event(workflow_run_id="run_1", event_type="task.started", source="scheduler", sequence_no=2)
-    )
-    service.publish(
-        make_event(workflow_run_id="run_1", event_type="task.completed", source="worker", sequence_no=3)
-    )
+    service.publish(make_event(workflow_run_id="run_1", event_type="task.ready", source="scheduler", sequence_no=1))
+    service.publish(make_event(workflow_run_id="run_1", event_type="task.started", source="scheduler", sequence_no=2))
+    service.publish(make_event(workflow_run_id="run_1", event_type="task.completed", source="worker", sequence_no=3))
 
     cursor = EventCursor(workflow_run_id="run_1", sequence_no=2, event_id="event_2")
     snapshot = service.stream.snapshot("run_1", cursor=cursor)
@@ -113,4 +107,3 @@ def test_observability_service_records_metrics_traces_and_separate_debug_artifac
     assert len(debug_store.list_for_run("run_1")) == 1
     assert debug_artifact.payload_json["api_key"] == "[REDACTED]"
     assert debug_store.list_for_run("run_1")[0].payload_json["api_key"] == "[REDACTED]"
-

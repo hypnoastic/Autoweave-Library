@@ -1,20 +1,57 @@
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ----- Virtual environments -----
+.venv/
+venv/
+env/
+
+# ----- Testing -----
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+reports/
+
+# ----- Type checking -----
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ----- IDE / Editor -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ----- OS -----
+.DS_Store
+Thumbs.db
+
+# ----- AutoWeave specific -----
 .env
 .env.local
-ergon-*.json
 config/secrets/
 var/
 workspaces/
 workspace/
+my-weave-project/
 tmp/
-dist/
-.venv/
-.DS_Store
-*.egg-info/
-__pycache__/
-.pytest_cache/
-.mypy_cache/
-.coverage
-*.pyc
+ergon-*.json
+context.md
 /agents/
 /configs/
-my-weave-project/
+
+# ----- Stray build artifacts -----
+*.jpeg
+*.jpg
+!docs/**/*.jpeg
+!docs/**/*.jpg

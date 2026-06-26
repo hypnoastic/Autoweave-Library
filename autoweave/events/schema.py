@@ -6,8 +6,9 @@ docs while remaining lightweight enough for in-memory testing.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,9 +39,9 @@ class EventCursor(BaseModel):
     workflow_run_id: str
     sequence_no: int = 0
     event_id: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
-    def advance(self, event: EventRecord) -> "EventCursor":
+    def advance(self, event: EventRecord) -> EventCursor:
         return self.model_copy(
             update={
                 "workflow_run_id": event.workflow_run_id,
@@ -60,9 +61,7 @@ def _merge_context(
         return payload
 
     correlation_data = (
-        correlation.model_dump()
-        if isinstance(correlation, EventCorrelationContext)
-        else dict(correlation)
+        correlation.model_dump() if isinstance(correlation, EventCorrelationContext) else dict(correlation)
     )
     for key, value in correlation_data.items():
         payload.setdefault(key, value)
@@ -86,9 +85,7 @@ def normalize_event(
     if isinstance(data, EventRecord):
         normalized = data.model_copy()
     else:
-        normalized = EventRecord.model_validate(
-            _merge_context(data, correlation)
-        )
+        normalized = EventRecord.model_validate(_merge_context(data, correlation))
 
     if event_type is not None:
         normalized = normalized.model_copy(update={"event_type": event_type})
@@ -134,4 +131,3 @@ def make_event(
         payload_json=payload_json or {},
         created_at=created_at or utc_now(),
     )
-

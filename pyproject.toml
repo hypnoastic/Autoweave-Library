@@ -1,5 +1,5 @@
 [build-system]
-requires = []
+requires = ["tomli; python_version < '3.11'"]
 build-backend = "build_backend"
 backend-path = ["."]
 
@@ -8,7 +8,22 @@ name = "autoweave"
 version = "0.1.0"
 description = "Terminal-first multi-agent orchestration library built around OpenHands remote workers and Vertex AI."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+authors = [
+  { name = "AutoWeave Contributors" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+  "Typing :: Typed",
+]
 dependencies = [
   "pydantic>=2.12.3",
   "pydantic-settings>=2.10.1",
@@ -30,16 +45,114 @@ dev = [
   "pytest>=9.0.2",
   "pytest-cov>=6.0.0",
   "pytest-playwright>=0.7.0",
-  "pip-audit>=2.7.3"
+  "pip-audit>=2.7.3",
+  "ruff",
+  "mypy",
+  "pre-commit",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hypnoastic/Autoweave"
+Documentation = "https://github.com/hypnoastic/Autoweave/tree/main/docs"
+Repository = "https://github.com/hypnoastic/Autoweave"
+Issues = "https://github.com/hypnoastic/Autoweave/issues"
+Changelog = "https://github.com/hypnoastic/Autoweave/releases"
 
 [project.scripts]
 autoweave = "apps.cli.main:main"
 
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "E",      # pycodestyle errors
+  "W",      # pycodestyle warnings
+  "F",      # pyflakes
+  "I",      # isort
+  "N",      # pep8-naming
+  "UP",     # pyupgrade
+  "B",      # flake8-bugbear
+  "SIM",    # flake8-simplify
+  "RUF",    # ruff-specific rules
+]
+ignore = [
+  "E501",   # line too long — handled by formatter
+  "B008",   # do not perform function calls in argument defaults (Typer/FastAPI pattern)
+  "SIM108", # use ternary operator — readability preference
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["autoweave", "apps"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F841"]
+"autoweave/monitoring/dashboard_page.py" = ["W291", "W293"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = [
+  "venv",
+  ".venv",
+  "dist",
+  "build",
+  "tests",
+]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
+markers = [
+  "integration: marks tests requiring external services (Redis, Postgres, etc.)",
+  "ui: marks tests requiring a browser (Playwright)",
+  "slow: marks tests that take significant time to run",
+]
 
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["autoweave"]
+omit = [
+  "*/tests/*",
+  "*/__pycache__/*",
+  "*/venv/*",
+  "*/.venv/*",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.",
+  "@overload",
+]
+
+# ---------------------------------------------------------------------------
+# Setuptools (for editable installs)
+# ---------------------------------------------------------------------------
 [tool.setuptools]
 include-package-data = true
 

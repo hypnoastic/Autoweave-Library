@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable
 
 from autoweave.models import (
-    AttemptState,
-    ArtifactRecord,
     ApprovalRequestRecord,
+    ArtifactRecord,
+    AttemptState,
     EventRecord,
     HumanRequestRecord,
     TaskAttemptRecord,
@@ -60,7 +59,11 @@ class InMemoryWorkflowRepository:
         return snapshot
 
     def list_workflow_runs(self) -> list[WorkflowRunRecord]:
-        runs = [self._graphs[run_id].workflow_run.model_copy(deep=True) for run_id in self._graphs_order if run_id in self._graphs]
+        runs = [
+            self._graphs[run_id].workflow_run.model_copy(deep=True)
+            for run_id in self._graphs_order
+            if run_id in self._graphs
+        ]
         return runs
 
     def get_graph(self, workflow_run_id: str) -> WorkflowGraph:
@@ -110,7 +113,9 @@ class InMemoryWorkflowRepository:
         self._task_key_index[(record.workflow_run_id, record.task_key)] = record.id
         graph = self._graphs.get(record.workflow_run_id)
         if graph is not None:
-            graph_tasks = [existing if existing.id != record.id else record.model_copy(deep=True) for existing in graph.tasks]
+            graph_tasks = [
+                existing if existing.id != record.id else record.model_copy(deep=True) for existing in graph.tasks
+            ]
             if record.id not in {existing.id for existing in graph.tasks}:
                 graph_tasks.append(record.model_copy(deep=True))
             self._graphs[record.workflow_run_id] = graph.model_copy(update={"tasks": graph_tasks}, deep=True)
@@ -128,7 +133,11 @@ class InMemoryWorkflowRepository:
 
     def list_attempts_for_run(self, workflow_run_id: str) -> list[TaskAttemptRecord]:
         attempt_ids = self._attempts_by_run.get(workflow_run_id, [])
-        return [self._attempts[attempt_id].model_copy(deep=True) for attempt_id in attempt_ids if attempt_id in self._attempts]
+        return [
+            self._attempts[attempt_id].model_copy(deep=True)
+            for attempt_id in attempt_ids
+            if attempt_id in self._attempts
+        ]
 
     def update_attempt_state(self, attempt_id: str, state: AttemptState) -> TaskAttemptRecord:
         attempt = self.get_attempt(attempt_id)
@@ -137,7 +146,13 @@ class InMemoryWorkflowRepository:
         return updated
 
     def list_active_attempts(self, workflow_run_id: str) -> list[TaskAttemptRecord]:
-        active_states = {AttemptState.QUEUED, AttemptState.DISPATCHING, AttemptState.RUNNING, AttemptState.PAUSED, AttemptState.NEEDS_INPUT}
+        active_states = {
+            AttemptState.QUEUED,
+            AttemptState.DISPATCHING,
+            AttemptState.RUNNING,
+            AttemptState.PAUSED,
+            AttemptState.NEEDS_INPUT,
+        }
         active_attempts: list[TaskAttemptRecord] = []
         for attempt_id in self._attempts_by_run.get(workflow_run_id, []):
             attempt = self._attempts.get(attempt_id)
@@ -175,11 +190,19 @@ class InMemoryWorkflowRepository:
 
     def list_artifacts_for_run(self, workflow_run_id: str) -> list[ArtifactRecord]:
         artifact_ids = self._artifacts_by_run.get(workflow_run_id, [])
-        return [self._artifacts[artifact_id].model_copy(deep=True) for artifact_id in artifact_ids if artifact_id in self._artifacts]
+        return [
+            self._artifacts[artifact_id].model_copy(deep=True)
+            for artifact_id in artifact_ids
+            if artifact_id in self._artifacts
+        ]
 
     def list_artifacts_for_task(self, task_id: str) -> list[ArtifactRecord]:
         artifact_ids = self._artifacts_by_task.get(task_id, [])
-        return [self._artifacts[artifact_id].model_copy(deep=True) for artifact_id in artifact_ids if artifact_id in self._artifacts]
+        return [
+            self._artifacts[artifact_id].model_copy(deep=True)
+            for artifact_id in artifact_ids
+            if artifact_id in self._artifacts
+        ]
 
     def save_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
         record = artifact.model_copy(deep=True)

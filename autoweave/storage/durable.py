@@ -9,25 +9,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from autoweave.models import (
     ApprovalRequestRecord,
-    ApprovalStatus,
     ArtifactRecord,
     AttemptState,
     DecisionRecord,
     EventRecord,
     HumanRequestRecord,
-    HumanRequestStatus,
     MemoryEntryRecord,
     TaskAttemptRecord,
     TaskEdgeRecord,
     TaskRecord,
-    TaskState,
     WorkflowDefinitionRecord,
     WorkflowGraph,
     WorkflowRunRecord,
@@ -56,11 +53,10 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 def _upsert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
     columns = ", ".join(row.keys())
-    placeholders = ", ".join([":" + key for key in row.keys()])
-    updates = ", ".join([f"{key}=excluded.{key}" for key in row.keys() if key != "id"])
+    placeholders = ", ".join([":" + key for key in row])
+    updates = ", ".join([f"{key}=excluded.{key}" for key in row if key != "id"])
     conn.execute(
-        f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) "
-        f"ON CONFLICT(id) DO UPDATE SET {updates}",
+        f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON CONFLICT(id) DO UPDATE SET {updates}",
         row,
     )
 
@@ -419,9 +415,7 @@ class SQLiteWorkflowRepository:
                 (workflow_run_id, task_key),
             ).fetchone()
             if row is None:
-                raise KeyError(
-                    f"task {task_key!r} is not registered in workflow run {workflow_run_id!r}"
-                )
+                raise KeyError(f"task {task_key!r} is not registered in workflow run {workflow_run_id!r}")
             return TaskRecord.model_validate_json(row["data_json"])
 
     def save_attempt(self, attempt: TaskAttemptRecord) -> TaskAttemptRecord:

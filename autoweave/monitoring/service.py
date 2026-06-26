@@ -4,19 +4,35 @@ from __future__ import annotations
 
 import copy
 import traceback
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from threading import Lock, Thread
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
+
 import yaml
 
 from autoweave.celery_queue import CeleryTaskSnapshot, CeleryWorkflowDispatcher, celery_execution_enabled
 from autoweave.compiler.loader import CanonicalConfigLoader
 from autoweave.exceptions import ConfigurationError, RuntimeErrorCode, RuntimeFailure, RuntimeOperationError
 from autoweave.local_runtime import LocalWorkflowRunReport, build_local_runtime
-from autoweave.models import ArtifactRecord, ApprovalRequestRecord, EventRecord, HumanRequestRecord, TaskAttemptRecord, TaskRecord, WorkflowRunRecord, generate_id
-from autoweave.monitoring.contracts import MonitoringActionReceipt, MonitoringJobStatus, MonitoringSnapshot, MonitoringSnapshotStatus
+from autoweave.models import (
+    ApprovalRequestRecord,
+    ArtifactRecord,
+    EventRecord,
+    HumanRequestRecord,
+    TaskAttemptRecord,
+    TaskRecord,
+    WorkflowRunRecord,
+    generate_id,
+)
+from autoweave.monitoring.contracts import (
+    MonitoringActionReceipt,
+    MonitoringJobStatus,
+    MonitoringSnapshot,
+    MonitoringSnapshotStatus,
+)
 from autoweave.settings import LocalEnvironmentSettings
 
 _ACTIVE_WORKER_ATTEMPT_STATES = {"dispatching", "running", "paused", "needs_input"}
@@ -113,7 +129,9 @@ class MonitoringJob:
             )
         elif self.report_payload is not None:
             summary_lines = tuple(str(line) for line in self.report_payload.get("summary_lines", ()))
-            step_reports = tuple(dict(step) for step in self.report_payload.get("step_reports", ()) if isinstance(step, Mapping))
+            step_reports = tuple(
+                dict(step) for step in self.report_payload.get("step_reports", ()) if isinstance(step, Mapping)
+            )
         receipt = MonitoringActionReceipt(
             id=self.id,
             action=self.action,
@@ -211,9 +229,7 @@ class MonitoringService:
             playbook = _load_yaml_mapping(role_dir / "playbook.yaml")
             soul_text = _read_text(role_dir / "soul.md")
             skill_files = sorted(
-                path.name
-                for path in (role_dir / "skills").glob("*.md")
-                if path.is_file() and path.name != "README.md"
+                path.name for path in (role_dir / "skills").glob("*.md") if path.is_file() and path.name != "README.md"
             )
             agents.append(
                 {
@@ -230,7 +246,9 @@ class MonitoringService:
                     "route_priority": metadata.get("route_priority", ""),
                     "playbook_goals": list(playbook.get("goals", [])),
                     "skill_files": skill_files,
-                    "soul_excerpt": soul_text.splitlines()[2] if len(soul_text.splitlines()) >= 3 else soul_text.strip(),
+                    "soul_excerpt": soul_text.splitlines()[2]
+                    if len(soul_text.splitlines()) >= 3
+                    else soul_text.strip(),
                 }
             )
         return agents
@@ -319,7 +337,9 @@ class MonitoringService:
             if request_key in self._snapshot_refreshing:
                 return None
             self._snapshot_refreshing.add(request_key)
-        thread = Thread(target=self._refresh_snapshot, kwargs={"limit": limit, "include_jobs": include_jobs}, daemon=True)
+        thread = Thread(
+            target=self._refresh_snapshot, kwargs={"limit": limit, "include_jobs": include_jobs}, daemon=True
+        )
         thread.start()
         return thread
 
@@ -365,8 +385,7 @@ class MonitoringService:
         if (
             self._can_short_circuit_clean_sqlite
             and self.root == settings.project_root
-            and
-            settings.autoweave_canonical_backend == "sqlite"
+            and settings.autoweave_canonical_backend == "sqlite"
             and not (settings.state_dir() / "autoweave.sqlite3").exists()
         ):
             return self._build_snapshot_payload(
@@ -708,10 +727,7 @@ class MonitoringService:
         events: list[EventRecord],
     ) -> dict[str, Any]:
         tasks_by_id = {task.id: task for task in tasks}
-        task_templates_by_key = {
-            template.key: template
-            for template in runtime.workflow_definition.task_templates
-        }
+        task_templates_by_key = {template.key: template for template in runtime.workflow_definition.task_templates}
         latest_attempt_by_task_id: dict[str, TaskAttemptRecord] = {}
         for attempt in attempts:
             current = latest_attempt_by_task_id.get(attempt.task_id)
@@ -719,11 +735,7 @@ class MonitoringService:
                 latest_attempt_by_task_id[attempt.task_id] = attempt
 
         manager_task = self._manager_task(tasks=tasks)
-        manager_latest_attempt = (
-            latest_attempt_by_task_id.get(manager_task.id)
-            if manager_task is not None
-            else None
-        )
+        manager_latest_attempt = latest_attempt_by_task_id.get(manager_task.id) if manager_task is not None else None
         manager_plan = self._manager_plan(runtime=runtime, tasks=tasks, artifacts=artifacts)
         manager_summary = self._manager_summary(runtime=runtime, tasks=tasks, artifacts=artifacts)
         manager_outcome = self._manager_outcome(
@@ -757,8 +769,12 @@ class MonitoringService:
                     "description": task.description,
                     "required_artifact_types": list(task.required_artifact_types_json),
                     "produced_artifact_types": list(task.produced_artifact_types_json),
-                    "hard_dependencies": list(getattr(template, "hard_dependencies", [])) if template is not None else [],
-                    "soft_dependencies": list(getattr(template, "soft_dependencies", [])) if template is not None else [],
+                    "hard_dependencies": list(getattr(template, "hard_dependencies", []))
+                    if template is not None
+                    else [],
+                    "soft_dependencies": list(getattr(template, "soft_dependencies", []))
+                    if template is not None
+                    else [],
                     "route_hints": list(getattr(template, "route_hints", [])) if template is not None else [],
                     "latest_attempt_id": latest_attempt.id if latest_attempt else None,
                     "latest_attempt_state": latest_attempt.state.value if latest_attempt else None,
@@ -777,9 +793,7 @@ class MonitoringService:
                     "worker_status": worker_status,
                     "worker_summary": worker_summary,
                     "has_active_worker": has_active_worker,
-                    "artifact_types": [
-                        artifact.artifact_type for artifact in grouped_artifacts.get(task.id, [])
-                    ],
+                    "artifact_types": [artifact.artifact_type for artifact in grouped_artifacts.get(task.id, [])],
                 }
             )
 
@@ -791,17 +805,12 @@ class MonitoringService:
                 "role": task.assigned_role,
                 "state": task.state.value,
                 "attempt_state": (
-                    latest_attempt_by_task_id[task.id].state.value
-                    if task.id in latest_attempt_by_task_id
-                    else None
+                    latest_attempt_by_task_id[task.id].state.value if task.id in latest_attempt_by_task_id else None
                 ),
                 "block_reason": task.block_reason,
                 "input_json": task.input_json,
                 "output_json": task.output_json,
-                "produced_artifacts": [
-                    artifact.artifact_type
-                    for artifact in grouped_artifacts.get(task.id, [])
-                ],
+                "produced_artifacts": [artifact.artifact_type for artifact in grouped_artifacts.get(task.id, [])],
             }
             for index, task in enumerate(tasks)
         ]
@@ -914,9 +923,7 @@ class MonitoringService:
             "manager_outcome": manager_outcome,
             "manager_task_state": manager_task.state.value if manager_task is not None else None,
             "manager_attempt_state": (
-                manager_latest_attempt.state.value
-                if manager_latest_attempt is not None
-                else None
+                manager_latest_attempt.state.value if manager_latest_attempt is not None else None
             ),
             "run_steps": run_steps,
             "tasks": task_payloads,
@@ -964,7 +971,9 @@ class MonitoringService:
                 }
             )
         if manager_summary and manager_summary != manager_plan and manager_summary != manager_outcome:
-            messages.append({"id": f"{workflow_run.id}:summary", "role": "manager", "kind": "summary", "text": manager_summary})
+            messages.append(
+                {"id": f"{workflow_run.id}:summary", "role": "manager", "kind": "summary", "text": manager_summary}
+            )
         for request in human_requests:
             messages.append(
                 {
@@ -1025,7 +1034,9 @@ class MonitoringService:
         tasks: list[TaskRecord],
         artifacts: list[ArtifactRecord],
     ) -> str | None:
-        manager_task_ids = {task.id for task in tasks if task.assigned_role == "manager" or task.task_key == "manager_plan"}
+        manager_task_ids = {
+            task.id for task in tasks if task.assigned_role == "manager" or task.task_key == "manager_plan"
+        }
         manager_tasks = [task for task in tasks if task.id in manager_task_ids]
         for task in manager_tasks:
             if task.state.value != "completed":
@@ -1062,7 +1073,9 @@ class MonitoringService:
         tasks: list[TaskRecord],
         artifacts: list[ArtifactRecord],
     ) -> str | None:
-        manager_task_ids = {task.id for task in tasks if task.assigned_role == "manager" or task.task_key == "manager_plan"}
+        manager_task_ids = {
+            task.id for task in tasks if task.assigned_role == "manager" or task.task_key == "manager_plan"
+        }
         manager_artifacts = [
             artifact
             for artifact in artifacts
@@ -1089,7 +1102,9 @@ class MonitoringService:
                     continue
                 llm_message = event.get("llm_message") or {}
                 content = llm_message.get("content") or []
-                text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+                text_parts = [
+                    part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+                ]
                 if text_parts:
                     messages.append("\n".join(text_parts).strip())
             if messages:
@@ -1175,11 +1190,7 @@ class MonitoringService:
     ) -> tuple[str, str, tuple[str, ...]]:
         open_human = [item for item in human_requests if item["status"] == "open"]
         open_approval = [item for item in approval_requests if item["status"] == "requested"]
-        active_attempts = [
-            attempt
-            for attempt in attempts_payload
-            if attempt["state"] in _ACTIVE_WORKER_ATTEMPT_STATES
-        ]
+        active_attempts = [attempt for attempt in attempts_payload if attempt["state"] in _ACTIVE_WORKER_ATTEMPT_STATES]
         active_task_keys = tuple(
             attempt["task_key"]
             for attempt in active_attempts
@@ -1213,7 +1224,11 @@ class MonitoringService:
         if failed_tasks:
             return "failed", f"no active worker; {len(failed_tasks)} task(s) failed", ()
         if waiting_dependency:
-            return "waiting_for_dependency", f"no active worker; {len(waiting_dependency)} task(s) waiting on dependencies", ()
+            return (
+                "waiting_for_dependency",
+                f"no active worker; {len(waiting_dependency)} task(s) waiting on dependencies",
+                (),
+            )
         return "idle", "no active worker", ()
 
     def _task_execution_projection(
@@ -1245,11 +1260,26 @@ class MonitoringService:
         if has_active_worker:
             return "active", f"Worker is active in attempt {latest_attempt.attempt_number}.", attempt_state, True
         if task_state == "waiting_for_approval":
-            return "waiting_for_approval", "No worker is running. Dispatch is paused until approval is granted.", "approval_gate", False
+            return (
+                "waiting_for_approval",
+                "No worker is running. Dispatch is paused until approval is granted.",
+                "approval_gate",
+                False,
+            )
         if task_state == "waiting_for_human":
-            return "waiting_for_human", "No worker is running. The task is waiting on human input.", "awaiting_human", False
+            return (
+                "waiting_for_human",
+                "No worker is running. The task is waiting on human input.",
+                "awaiting_human",
+                False,
+            )
         if task_state == "waiting_for_dependency":
-            return "waiting_for_dependency", "No worker is running. The task is waiting on dependencies.", "dependency_wait", False
+            return (
+                "waiting_for_dependency",
+                "No worker is running. The task is waiting on dependencies.",
+                "dependency_wait",
+                False,
+            )
         if task_state == "ready":
             return "ready", "No worker is running. The task is ready to dispatch.", "ready_to_dispatch", False
         if task_state == "completed":

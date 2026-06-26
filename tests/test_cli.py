@@ -15,7 +15,6 @@ from autoweave.local_runtime import build_local_runtime
 from autoweave.models import MemoryEntryRecord, MemoryLayer
 from autoweave.templates import sample_project
 
-
 runner = CliRunner()
 
 
@@ -26,7 +25,7 @@ def _write_docs(root: Path) -> None:
         "autoweave_high_level_architecture.md",
         "autoweave_implementation_spec.md",
         "autoweave_diagrams_source.md",
-        ):
+    ):
         (docs_dir / name).write_text(f"# {name}\n", encoding="utf-8")
 
 
@@ -93,8 +92,13 @@ def test_validate_repository_uses_packaged_defaults_when_agents_and_configs_are_
     assert result.ok
     assert not result.missing
     assert not result.invalid
-    assert any("using packaged template defaults for agents/manager/autoweave.yaml" == warning for warning in result.warnings)
-    assert any("using packaged template defaults for configs/workflows/team.workflow.yaml" == warning for warning in result.warnings)
+    assert any(
+        warning == "using packaged template defaults for agents/manager/autoweave.yaml" for warning in result.warnings
+    )
+    assert any(
+        warning == "using packaged template defaults for configs/workflows/team.workflow.yaml"
+        for warning in result.warnings
+    )
 
 
 def test_bootstrap_writes_role_specific_agent_metadata(tmp_path: Path) -> None:
@@ -102,7 +106,9 @@ def test_bootstrap_writes_role_specific_agent_metadata(tmp_path: Path) -> None:
     bootstrap_repository(tmp_path)
 
     manager_autoweave = yaml.safe_load((tmp_path / "agents" / "manager" / "autoweave.yaml").read_text(encoding="utf-8"))
-    reviewer_autoweave = yaml.safe_load((tmp_path / "agents" / "reviewer" / "autoweave.yaml").read_text(encoding="utf-8"))
+    reviewer_autoweave = yaml.safe_load(
+        (tmp_path / "agents" / "reviewer" / "autoweave.yaml").read_text(encoding="utf-8")
+    )
     manager_playbook = yaml.safe_load((tmp_path / "agents" / "manager" / "playbook.yaml").read_text(encoding="utf-8"))
 
     assert manager_autoweave["specialization"] == "workflow-decomposition"
@@ -150,7 +156,9 @@ def test_validate_command_detects_missing_docs(tmp_path: Path) -> None:
     assert "missing=docs/autoweave_diagrams_source.md" in result.stdout
 
 
-def test_validate_command_succeeds_with_packaged_defaults_when_project_files_are_not_materialized(tmp_path: Path) -> None:
+def test_validate_command_succeeds_with_packaged_defaults_when_project_files_are_not_materialized(
+    tmp_path: Path,
+) -> None:
     _write_docs(tmp_path)
 
     result = runner.invoke(app, ["validate", "--root", str(tmp_path)])

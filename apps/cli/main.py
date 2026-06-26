@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
 import typer
 
 from apps.cli.bootstrap import bootstrap_repository, migrate_repository, repository_root
@@ -35,7 +36,9 @@ def _echo_validation_result(root_path: Path, result: ValidationResult) -> None:
         typer.echo(f"warning={warning}")
 
 
-def _echo_migration_result(root_path: Path, *, created: tuple[Path, ...], updated: tuple[Path, ...], dry_run: bool) -> None:
+def _echo_migration_result(
+    root_path: Path, *, created: tuple[Path, ...], updated: tuple[Path, ...], dry_run: bool
+) -> None:
     action = "would_update" if dry_run else "updated"
     typer.echo(f"created={len(created)}")
     for path in created:
@@ -85,7 +88,9 @@ def validate(root: Path | None = typer.Option(None, "--root", help="Repository r
 @app.command("bootstrap")
 def bootstrap(
     root: Path | None = typer.Option(None, "--root", help="Repository root to bootstrap"),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite the sample project files from packaged templates"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite the sample project files from packaged templates"
+    ),
 ) -> None:
     """Create missing sample agents and config fixtures."""
     root_path = repository_root(root)
@@ -105,7 +110,9 @@ def bootstrap(
 @app.command("migrate-project")
 def migrate_project(
     root: Path | None = typer.Option(None, "--root", help="Project root to migrate"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show which packaged template-managed files would be refreshed"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show which packaged template-managed files would be refreshed"
+    ),
 ) -> None:
     """Refresh packaged AutoWeave project-managed files to the latest library templates."""
     root_path = repository_root(root)
@@ -116,12 +123,15 @@ def migrate_project(
 @app.command("create-agent")
 def create_agent(
     name: str = typer.Argument(..., help="Name of the new agent"),
-    role: str | None = typer.Option(None, "--role", help="Template role to base this agent on (e.g., manager, backend, frontend, reviewer)"),
+    role: str | None = typer.Option(
+        None, "--role", help="Template role to base this agent on (e.g., manager, backend, frontend, reviewer)"
+    ),
     root: Path | None = typer.Option(None, "--root", help="Repository root"),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing agent files"),
 ) -> None:
     """Create a new agent bundle with soul, playbook, config, and skills."""
     from apps.cli.bootstrap import create_agent as create_agent_bundle
+
     root_path = repository_root(root)
     result = create_agent_bundle(root_path, name=name, role=role, overwrite=overwrite)
     if result.created:
@@ -154,7 +164,9 @@ def doctor(root: Path | None = typer.Option(None, "--root", help="Repository roo
 @app.command("run-example")
 def run_example(
     root: Path | None = typer.Option(None, "--root", help="Repository root to inspect"),
-    dispatch: bool = typer.Option(False, "--dispatch/--dry-run", help="Send the example bootstrap request to OpenHands"),
+    dispatch: bool = typer.Option(
+        False, "--dispatch/--dry-run", help="Send the example bootstrap request to OpenHands"
+    ),
 ) -> None:
     """Run the notifications example against the composed local runtime."""
     root_path = repository_root(root)
@@ -179,7 +191,9 @@ def run_workflow(
     request: str | None = typer.Option(None, "--request", help="User request to seed into the workflow entrypoint"),
     preset: str | None = typer.Option(None, "--preset", help="Workflow preset to dispatch"),
     dispatch: bool = typer.Option(False, "--dispatch/--dry-run", help="Dispatch runnable tasks to OpenHands"),
-    queue: bool = typer.Option(False, "--queue", help="Enqueue workflow execution onto Celery instead of running inline"),
+    queue: bool = typer.Option(
+        False, "--queue", help="Enqueue workflow execution onto Celery instead of running inline"
+    ),
     max_steps: int = typer.Option(8, "--max-steps", min=1, help="Maximum runnable tasks to advance in one invocation"),
 ) -> None:
     """Run the current workflow from a user request instead of the fixed sample brief."""
@@ -201,7 +215,7 @@ def run_workflow(
             dispatcher = CeleryWorkflowDispatcher(root=root_path)
         except RuntimeError as exc:
             typer.echo(f"celery_error={exc}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
         celery_health = dispatcher.worker_health()
         typer.echo(f"celery_health={celery_health}")
         if not celery_health.startswith("ok"):
@@ -228,8 +242,12 @@ def worker(
     root: Path | None = typer.Option(None, "--root", help="Project root that owns the Celery-backed AutoWeave queues"),
     concurrency: int = typer.Option(1, "--concurrency", min=1, help="Celery worker concurrency"),
     loglevel: str = typer.Option("info", "--loglevel", help="Celery worker log level"),
-    queues: str | None = typer.Option(None, "--queues", help="Comma-separated queue names; defaults to project runtime config"),
-    pool: str | None = typer.Option(None, "--pool", help="Celery worker pool; defaults to runtime config or a local-safe platform default"),
+    queues: str | None = typer.Option(
+        None, "--queues", help="Comma-separated queue names; defaults to project runtime config"
+    ),
+    pool: str | None = typer.Option(
+        None, "--pool", help="Celery worker pool; defaults to runtime config or a local-safe platform default"
+    ),
 ) -> None:
     """Run a real Celery worker for queued AutoWeave workflow execution."""
     root_path = repository_root(root)
@@ -239,7 +257,7 @@ def worker(
         celery_app = create_autoweave_celery_app(root=root_path)
     except RuntimeError as exc:
         typer.echo(f"celery_error={exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     queue_names = [item.strip() for item in (queues.split(",") if queues else dispatcher.queue_names) if item.strip()]
     configured_pool = pool or getattr(dispatcher.runtime_config, "celery_worker_pool", "auto")
     selected_pool = _resolve_celery_worker_pool(configured_pool)
@@ -285,8 +303,9 @@ def start(
 ) -> None:
     """Start the entire local execution environment: UI and Celery worker."""
     import time
+
     root_path = repository_root(root)
-    
+
     # Validation
     repo_result = validate_repository(root_path)
     if not repo_result.ok:
@@ -294,12 +313,12 @@ def start(
         raise typer.Exit(code=1)
 
     typer.echo("Starting AutoWeave UI and Celery Worker...")
-    
+
     ui_proc = subprocess.Popen(
         [sys.executable, "-m", "apps.cli.main", "ui", "--root", str(root_path), "--port", str(port)],
         cwd=root_path,
     )
-    
+
     worker_proc = subprocess.Popen(
         [sys.executable, "-m", "apps.cli.main", "worker", "--root", str(root_path)],
         cwd=root_path,
@@ -317,10 +336,10 @@ def start(
                 worker_proc.kill()
                 raise typer.Exit(code=1)
             prompt = PRESETS[preset]
-        
+
         typer.echo(f"Waiting for worker to initialize before dispatching request: '{prompt}'...")
-        time.sleep(3) # Wait for Celery worker to be ready
-        
+        time.sleep(3)  # Wait for Celery worker to be ready
+
         try:
             dispatcher = CeleryWorkflowDispatcher(root=root_path)
             receipt = dispatcher.enqueue_new_workflow(request=prompt, dispatch=True, max_steps=8)
@@ -388,9 +407,7 @@ def cleanup_local_state(
 @app.command("new-project")
 def new_project(
     path: Path = typer.Argument(..., help="Directory to initialize the new project in"),
-    repo_source: Path = typer.Option(
-        None, "--repo-source", help="Path to an AutoWeave repo to use as a template"
-    ),
+    repo_source: Path = typer.Option(None, "--repo-source", help="Path to an AutoWeave repo to use as a template"),
 ) -> None:
     """Initialize a new AutoWeave project."""
     if repo_source is None:

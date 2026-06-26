@@ -2,53 +2,17 @@
 
 from __future__ import annotations
 
-import threading
 import json
 import shutil
+import threading
 import time
+from collections.abc import Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from autoweave.compiler.loader import CanonicalConfigLoader
-from autoweave.events.service import EventService
-from autoweave.models import (
-    ApprovalStatus,
-    AttemptState,
-    ArtifactRecord,
-    ArtifactStatus,
-    EdgeType,
-    EventRecord,
-    HumanRequestRecord,
-    HumanRequestStatus,
-    HumanRequestType,
-    MemoryEntryRecord,
-    MemoryLayer,
-    TaskEdgeRecord,
-    TaskAttemptRecord,
-    TaskRecord,
-    TaskState,
-    generate_id,
-)
-from autoweave.observability import LocalObservabilityService
-from autoweave.orchestration.service import OrchestrationService
-from autoweave.orchestration.state import WorkflowRunState
-from autoweave.routing.policy import VertexModelRouter
-from autoweave.settings import LocalEnvironmentSettings
-from autoweave.storage import LocalStorageWiring, build_local_storage_wiring
-from autoweave.workers.runtime import (
-    OpenHandsAgentServerClient,
-    OpenHandsRemoteWorkerAdapter,
-    OpenHandsServiceCall,
-    OpenHandsStreamEvent,
-    extract_semantic_clarification_questions,
-    extract_openhands_stream_events,
-    normalize_openhands_stream_event,
-    stream_event_to_artifact,
-    WorkspacePolicy,
-)
-from autoweave.workflows import build_workflow_graph
 from autoweave.config_models import (
     AgentDefinitionConfig,
     ObservabilityConfig,
@@ -59,7 +23,44 @@ from autoweave.config_models import (
     WorkflowDefinitionConfig,
 )
 from autoweave.events.schema import EventCorrelationContext, make_event
+from autoweave.events.service import EventService
+from autoweave.models import (
+    ApprovalStatus,
+    ArtifactRecord,
+    ArtifactStatus,
+    AttemptState,
+    EdgeType,
+    EventRecord,
+    HumanRequestRecord,
+    HumanRequestStatus,
+    HumanRequestType,
+    MemoryEntryRecord,
+    MemoryLayer,
+    TaskAttemptRecord,
+    TaskEdgeRecord,
+    TaskRecord,
+    TaskState,
+    generate_id,
+)
+from autoweave.observability import LocalObservabilityService
+from autoweave.orchestration.service import OrchestrationService
+from autoweave.orchestration.state import WorkflowRunState
+from autoweave.routing.policy import VertexModelRouter
+from autoweave.settings import LocalEnvironmentSettings
+from autoweave.storage import LocalStorageWiring, build_local_storage_wiring
 from autoweave.types import JsonDict
+from autoweave.workers.runtime import (
+    OpenHandsAgentServerClient,
+    OpenHandsRemoteWorkerAdapter,
+    OpenHandsServiceCall,
+    OpenHandsStreamEvent,
+    WorkspacePolicy,
+    extract_openhands_stream_events,
+    extract_semantic_clarification_questions,
+    normalize_openhands_stream_event,
+    stream_event_to_artifact,
+)
+from autoweave.workflows import build_workflow_graph
 
 
 @dataclass(slots=True, frozen=True)
@@ -194,10 +195,7 @@ class LocalWorkflowRunReport:
             f"open_approval_requests={len(self.open_approval_reasons)}",
         ]
         for index, step in enumerate(self.step_reports, start=1):
-            lines.append(
-                "step_"
-                f"{index}={step.task_key}:{step.task_state}:{step.attempt_state}:{step.route_model_name}"
-            )
+            lines.append(f"step_{index}={step.task_key}:{step.task_state}:{step.attempt_state}:{step.route_model_name}")
             if step.failure_reason:
                 lines.append(f"step_{index}_failure={step.failure_reason}")
         for index, question in enumerate(self.open_human_questions, start=1):
@@ -269,7 +267,7 @@ class LocalRuntime:
         bootstrap_path: str = "/api/conversations",
         workflow_run_id: str | None = None,
         project_id: str | None = None,
-    ) -> "LocalRuntime":
+    ) -> LocalRuntime:
         settings = LocalEnvironmentSettings.load(root=root, environ=environ)
         settings.ensure_local_layout()
 
@@ -349,7 +347,7 @@ class LocalRuntime:
     def close(self) -> None:
         self.openhands_client.close()
 
-    def __enter__(self) -> "LocalRuntime":
+    def __enter__(self) -> LocalRuntime:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -1010,9 +1008,7 @@ class LocalRuntime:
         if not empty_events or execution_status != "stuck":
             return events
         reasoning_only_count = sum(
-            1
-            for event in empty_events
-            if bool(event.payload_json.get("reasoning_content_present"))
+            1 for event in empty_events if bool(event.payload_json.get("reasoning_content_present"))
         )
 
         diagnostic = (
@@ -1100,10 +1096,7 @@ class LocalRuntime:
                 or event.requires_human
                 or event.approval_required
             )
-            is_failure_terminal = event.terminal and (
-                outcome in failure_outcomes
-                or event.event_type == "error"
-            )
+            is_failure_terminal = event.terminal and (outcome in failure_outcomes or event.event_type == "error")
             if seen_nonfailure_terminal and is_failure_terminal:
                 event = replace(
                     event,
@@ -1694,7 +1687,9 @@ class LocalRuntime:
             artifact_type="openhands_replay",
             title=f"OpenHands conversation {conversation_id}",
             summary=self._conversation_summary(normalized, execution_status),
-            status=ArtifactStatus.FINAL if execution_status in {"finished", "error", "stuck", "paused", "waiting_for_confirmation"} else ArtifactStatus.DRAFT,
+            status=ArtifactStatus.FINAL
+            if execution_status in {"finished", "error", "stuck", "paused", "waiting_for_confirmation"}
+            else ArtifactStatus.DRAFT,
             version=1,
             storage_uri="",
             checksum="",
@@ -1703,7 +1698,9 @@ class LocalRuntime:
                 "conversation_id": conversation_id,
                 "execution_status": execution_status,
                 "event_count": len(event_payloads),
-                "persistence_dir": final_info.response_json.get("persistence_dir", bootstrap_call.response_json.get("persistence_dir")),
+                "persistence_dir": final_info.response_json.get(
+                    "persistence_dir", bootstrap_call.response_json.get("persistence_dir")
+                ),
             },
         )
         stored_replay = self._put_artifact(replay_artifact, payload=debug_payload)
@@ -1713,9 +1710,7 @@ class LocalRuntime:
         error_text = (final_info.error or "").strip().lower()
         if "timed out" not in error_text:
             return False
-        if final_info.execution_status in {"finished", "error", "stuck", "paused", "waiting_for_confirmation"}:
-            return False
-        return True
+        return final_info.execution_status not in {"finished", "error", "stuck", "paused", "waiting_for_confirmation"}
 
     def _process_openhands_stream(
         self,
@@ -1758,7 +1753,8 @@ class LocalRuntime:
                 attempt=current_attempt,
                 event_type=f"openhands.{stream_event.event_type}",
                 source="openhands",
-                payload_json=stream_event.payload_json | {"message": stream_event.message, "outcome": stream_event.outcome},
+                payload_json=stream_event.payload_json
+                | {"message": stream_event.message, "outcome": stream_event.outcome},
             )
             if stream_event.requires_human:
                 answered_clarification = self._answered_clarification_for_question(
@@ -1781,10 +1777,7 @@ class LocalRuntime:
                     retry_limit = self._clarification_retry_limit()
                     current_attempt = self.orchestration.abort_attempt(current_attempt.id)
                     if reuse_count >= retry_limit:
-                        diagnostic_reason = (
-                            "duplicate_answered_clarification_loop: "
-                            f"{answered_request.question}"
-                        )
+                        diagnostic_reason = f"duplicate_answered_clarification_loop: {answered_request.question}"
                         current_task = current_task.model_copy(
                             update={
                                 "output_json": {
@@ -1954,8 +1947,21 @@ class LocalRuntime:
                 )
 
             outcome = (stream_event.outcome or "").lower()
-            terminal = stream_event.terminal or outcome in {"success", "succeeded", "complete", "completed", "failure", "failed", "error", "timeout", "crash", "orphaned"}
-            if outcome in {"success", "succeeded", "complete", "completed"} or (stream_event.event_type in {"complete", "completed", "final"} and not outcome):
+            terminal = stream_event.terminal or outcome in {
+                "success",
+                "succeeded",
+                "complete",
+                "completed",
+                "failure",
+                "failed",
+                "error",
+                "timeout",
+                "crash",
+                "orphaned",
+            }
+            if outcome in {"success", "succeeded", "complete", "completed"} or (
+                stream_event.event_type in {"complete", "completed", "final"} and not outcome
+            ):
                 terminal_summary = latest_terminal_message or latest_message or current_task.description
                 current_task = current_task.model_copy(
                     update={
@@ -1966,7 +1972,9 @@ class LocalRuntime:
                     }
                 )
                 self.orchestration.state.update_task(current_task)
-                current_task, current_attempt = self.orchestration.finalize_attempt_success(current_task.id, current_attempt.id)
+                current_task, current_attempt = self.orchestration.finalize_attempt_success(
+                    current_task.id, current_attempt.id
+                )
                 self._persist_memory_entry(
                     task=current_task,
                     content=f"{current_task.title}: {terminal_summary}",
@@ -2299,10 +2307,12 @@ class LocalRuntime:
                         stream_events=stream_events,
                     )
                     if combined_stream:
-                        final_task, final_attempt, processed_stream_events, artifact_ids = self._process_openhands_stream(
-                            task=final_task,
-                            attempt=final_attempt,
-                            stream_events=combined_stream,
+                        final_task, final_attempt, processed_stream_events, artifact_ids = (
+                            self._process_openhands_stream(
+                                task=final_task,
+                                attempt=final_attempt,
+                                stream_events=combined_stream,
+                            )
                         )
                         failure_reason = next(
                             (
@@ -2364,7 +2374,9 @@ class LocalRuntime:
                             reason=bootstrap_call.error or bootstrap_call.response_text or "openhands bootstrap failed",
                             recoverable=False,
                         )
-                    failure_reason = bootstrap_call.error or bootstrap_call.response_text or "openhands bootstrap failed"
+                    failure_reason = (
+                        bootstrap_call.error or bootstrap_call.response_text or "openhands bootstrap failed"
+                    )
                     with self._runtime_lock:
                         self._sync_canonical_state()
             finally:
@@ -2467,8 +2479,7 @@ class LocalRuntime:
 
     def doctor(self) -> LocalRuntimeDoctorReport:
         ready_task_keys = tuple(
-            self.orchestration.state.task(task_id).task_key
-            for task_id in self.orchestration.schedule().ready_tasks
+            self.orchestration.state.task(task_id).task_key for task_id in self.orchestration.schedule().ready_tasks
         )
         return LocalRuntimeDoctorReport(
             project_root=self.settings.project_root,
@@ -2543,7 +2554,9 @@ class LocalRuntime:
         *,
         clear_projection_namespace: bool = False,
     ) -> LocalCleanupReport:
-        selected_run_ids = tuple(dict.fromkeys(run_id.strip() for run_id in workflow_run_ids if run_id and run_id.strip()))
+        selected_run_ids = tuple(
+            dict.fromkeys(run_id.strip() for run_id in workflow_run_ids if run_id and run_id.strip())
+        )
         repository = self.storage.workflow_repository
         if not hasattr(repository, "delete_workflow_run"):
             raise RuntimeError("workflow repository does not support run deletion")
@@ -2573,7 +2586,9 @@ class LocalRuntime:
                 task_ids={task.id for task in tasks},
             )
             purged_run_ids.append(workflow_run_id)
-            deleted_paths.extend(self._cleanup_workflow_run_files(workflow_run_id, attempts=attempts, artifacts=artifacts))
+            deleted_paths.extend(
+                self._cleanup_workflow_run_files(workflow_run_id, attempts=attempts, artifacts=artifacts)
+            )
 
         projection_cleared = False
         if clear_projection_namespace and hasattr(self.storage.graph_projection, "clear_namespace"):
@@ -2670,7 +2685,9 @@ class LocalRuntime:
         artifact_root = self.settings.artifact_store_path() / workflow_run_id
         self._remove_path_if_exists(artifact_root, deleted_paths)
         for artifact in artifacts:
-            artifact_dir = self.settings.artifact_store_path() / artifact.workflow_run_id / artifact.task_id / artifact.id
+            artifact_dir = (
+                self.settings.artifact_store_path() / artifact.workflow_run_id / artifact.task_id / artifact.id
+            )
             self._remove_path_if_exists(artifact_dir, deleted_paths)
         for attempt in attempts:
             workspace_path = self.worker_adapter.workspace_policy.workspace_path_for_attempt(attempt.id)
@@ -2822,9 +2839,7 @@ class LocalRuntime:
                         schedule = self.orchestration.schedule()
                         active_attempt_count = len(self.orchestration.active_attempts())
                         ready_task_ids = [
-                            task_id
-                            for task_id in schedule.ready_tasks
-                            if task_id not in running_task_ids
+                            task_id for task_id in schedule.ready_tasks if task_id not in running_task_ids
                         ]
                     available_capacity = max(
                         0,

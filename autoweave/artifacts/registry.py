@@ -6,9 +6,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from autoweave.artifacts.handles import ArtifactHandle, InlineArtifactPayload
 from autoweave.artifacts.filesystem import ArtifactPayloadStore
+from autoweave.artifacts.handles import ArtifactHandle, InlineArtifactPayload
 from autoweave.models import ArtifactRecord, ArtifactStatus
+
 
 @dataclass(frozen=True)
 class ArtifactVisibilityDecision:
@@ -37,7 +38,10 @@ class InMemoryArtifactRegistry:
         version_key = (record.workflow_run_id, record.task_id, record.artifact_type)
         existing = self._list_task_artifacts(record.task_id, record.workflow_run_id)
         current_max_version = max(
-            [self._artifact_versions[version_key], *[candidate.version for candidate in existing if candidate.artifact_type == record.artifact_type]],
+            [
+                self._artifact_versions[version_key],
+                *[candidate.version for candidate in existing if candidate.artifact_type == record.artifact_type],
+            ],
             default=0,
         )
         next_version = current_max_version + 1
@@ -56,7 +60,6 @@ class InMemoryArtifactRegistry:
         ]
         if record.status == ArtifactStatus.FINAL:
             for prior in prior_records:
-                prior_id = prior.id
                 if prior.status == ArtifactStatus.FINAL:
                     superseded = prior.model_copy(update={"status": ArtifactStatus.SUPERSEDED})
                     self._persist_artifact(superseded)
@@ -111,14 +114,18 @@ class InMemoryArtifactRegistry:
             else:
                 if candidate.status.value != status:
                     continue
-                if candidate.status == ArtifactStatus.DRAFT and not candidate.metadata_json.get("allow_draft_visibility", False):
+                if candidate.status == ArtifactStatus.DRAFT and not candidate.metadata_json.get(
+                    "allow_draft_visibility", False
+                ):
                     continue
             artifacts.append(candidate.model_copy(deep=True))
 
         artifacts.sort(key=lambda item: (item.created_at, item.version, item.id))
         return artifacts
 
-    def resolve_payload(self, artifact_id: str, *, max_inline_bytes: int = 256_000) -> InlineArtifactPayload | ArtifactHandle:
+    def resolve_payload(
+        self, artifact_id: str, *, max_inline_bytes: int = 256_000
+    ) -> InlineArtifactPayload | ArtifactHandle:
         artifact = self.get_artifact(artifact_id)
         size_bytes = int(artifact.metadata_json.get("size_bytes", len(artifact.summary.encode("utf-8"))))
         if size_bytes <= max_inline_bytes:
@@ -160,4 +167,8 @@ class InMemoryArtifactRegistry:
                 return [artifact.model_copy(deep=True) for artifact in artifacts]
             except KeyError:
                 return []
-        return [artifact.model_copy(deep=True) for artifact in self._artifacts.values() if artifact.workflow_run_id == workflow_run_id]
+        return [
+            artifact.model_copy(deep=True)
+            for artifact in self._artifacts.values()
+            if artifact.workflow_run_id == workflow_run_id
+        ]

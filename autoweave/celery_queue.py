@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 try:
     from celery import Celery
@@ -102,7 +103,9 @@ def recovery_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]
             resolved[target_key] = str(resolved.get(source_key) or "")
 
     if "RUNTIME_POSTGRES_URL" in resolved or not str(resolved.get("AUTOWEAVE_CANONICAL_BACKEND") or "").strip():
-        resolved["AUTOWEAVE_CANONICAL_BACKEND"] = "postgres" if str(resolved.get("POSTGRES_URL") or "").strip() else "sqlite"
+        resolved["AUTOWEAVE_CANONICAL_BACKEND"] = (
+            "postgres" if str(resolved.get("POSTGRES_URL") or "").strip() else "sqlite"
+        )
     if "RUNTIME_NEO4J_URL" in resolved or not str(resolved.get("AUTOWEAVE_GRAPH_BACKEND") or "").strip():
         resolved["AUTOWEAVE_GRAPH_BACKEND"] = "neo4j" if str(resolved.get("NEO4J_URL") or "").strip() else "sqlite"
     return resolved
@@ -127,7 +130,9 @@ def create_autoweave_celery_app(
     runtime_config: RuntimeConfig | None = None,
 ) -> Celery:
     if _CELERY_IMPORT_ERROR is not None or Celery is None or Queue is None:
-        raise RuntimeError("Celery is not installed. Install project dependencies to use queue-backed dispatch.") from _CELERY_IMPORT_ERROR
+        raise RuntimeError(
+            "Celery is not installed. Install project dependencies to use queue-backed dispatch."
+        ) from _CELERY_IMPORT_ERROR
     if settings is None or runtime_config is None:
         loaded_settings, loaded_runtime_config = load_runtime_bundle(root=root, environ=environ)
         settings = settings or loaded_settings
@@ -266,7 +271,7 @@ class CeleryWorkflowDispatcher:
         self.queue_names = _queue_names(runtime_config)
 
     @classmethod
-    def from_runtime(cls, runtime: Any) -> "CeleryWorkflowDispatcher":
+    def from_runtime(cls, runtime: Any) -> CeleryWorkflowDispatcher:
         return cls(
             root=runtime.settings.project_root,
             settings=runtime.settings,
@@ -284,12 +289,8 @@ class CeleryWorkflowDispatcher:
             if response:
                 active_queues = inspect.active_queues() or {}
                 subscribed_workers = 0
-                for worker_name, queues in active_queues.items():
-                    queue_names = {
-                        str(queue.get("name") or "").strip()
-                        for queue in queues
-                        if isinstance(queue, dict)
-                    }
+                for _worker_name, queues in active_queues.items():
+                    queue_names = {str(queue.get("name") or "").strip() for queue in queues if isinstance(queue, dict)}
                     if queue_names & set(self.queue_names):
                         subscribed_workers += 1
                 if active_queues and subscribed_workers == 0:
@@ -361,7 +362,9 @@ class CeleryWorkflowDispatcher:
 
     def inspect_task(self, task_id: str) -> CeleryTaskSnapshot:
         if AsyncResult is None:
-            raise RuntimeError("Celery is not installed. Install project dependencies to inspect queued workflow tasks.")
+            raise RuntimeError(
+                "Celery is not installed. Install project dependencies to inspect queued workflow tasks."
+            )
         result = AsyncResult(task_id, app=self.app)
         state = str(result.state or "PENDING")
         payload = result.result if state == "SUCCESS" else None
