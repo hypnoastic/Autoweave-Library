@@ -20,8 +20,22 @@ Start the AutoWeave UI and Celery worker using the `start` command. This will sp
 autoweave start
 ```
 
-## 4. Running a Workflow
+## 4. Running a Workflow (CLI)
 To execute a workflow, you can either trigger a pre-configured example or run a custom workflow:
 ```bash
-autoweave run-example
+autoweave run-workflow --root . --request "Create a React component for a login page"
+```
+
+## 5. Running a Workflow (Python)
+You can also trigger runs natively from your own Python code:
+
+```python
+from autoweave.orchestration.runtime import build_local_runtime
+
+runtime = build_local_runtime(root_path=".")
+
+workflow_run = runtime.launch_workflow(
+    request="Review the backend contract and propose next steps"
+)
+print(f"Successfully started workflow run: {workflow_run.id}")
 ```
