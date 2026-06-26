@@ -3474,6 +3474,12 @@ Build AutoWeave as a **Vertex-AI-backed, OpenHands-powered multi-agent orchestra
                 runsList.innerHTML = `<div class="empty-state"><span class="material-symbols-outlined">history</span><p>No historical runs found.</p></div>`;
                 return;
             }
+            
+            // Preserve expanded states
+            const expandedIds = new Set();
+            document.querySelectorAll('#runs-list .run-item.expanded').forEach(el => {
+                expandedIds.add(el.id);
+            });
 
             let html = '';
             state.payload.runs.forEach(run => {
@@ -3507,8 +3513,10 @@ Build AutoWeave as a **Vertex-AI-backed, OpenHands-powered multi-agent orchestra
                 const isRunning = run.execution_status === "running" || run.execution_status === "dispatching";
                 const pillClass = isRunning ? "pill-running" : (run.execution_status === "completed" || run.execution_status === "succeeded" ? "pill-success" : "pill-idle");
                 
+                const runElementId = `run-item-${escapeHtml(run.id)}`;
+                const expandedClass = expandedIds.has(runElementId) ? ' expanded' : '';
                 html += `
-                    <div id="run-item-${escapeHtml(run.id)}" class="run-item" onclick="toggleRunExpanded('${escapeHtml(run.id)}')">
+                    <div id="${runElementId}" class="run-item${expandedClass}" onclick="toggleRunExpanded('${escapeHtml(run.id)}')">
                         <div class="run-item-header">
                             <div>
                                 <div style="font-weight: 500; font-size: 14px; margin-bottom: 4px;">Run: ${escapeHtml(run.id || run.title)}</div>
